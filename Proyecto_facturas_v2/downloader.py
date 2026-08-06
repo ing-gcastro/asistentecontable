@@ -103,10 +103,10 @@ def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
             if "gire" in email or "gire.com" in email:
                 continue
                 
-            # EntryID a veces cambia en Outlook cacheado, usamos Fecha+Asunto para estar 100% seguros
+            # Usamos Fecha + Asunto + Remitente para estar 100% seguros
             asunto_limpio = msg.Subject.replace('\r', '').replace('\n', '')[:50] if msg.Subject else "sin_asunto"
             fecha_str = msg.ReceivedTime.strftime('%Y%m%d%H%M%S')
-            entry_id = f"{fecha_str}_{asunto_limpio}"
+            entry_id = f"{fecha_str}_{email}_{asunto_limpio}"
             
             if entry_id in procesados:
                 continue
