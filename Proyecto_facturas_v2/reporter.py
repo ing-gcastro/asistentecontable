@@ -1,14 +1,16 @@
 import os
 import re
+import json
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
 from config import CARPETA_C  # Ruta donde se guardará el reporte HTML de salida
 
-HTML_SALIDA = os.path.join(CARPETA_C, "Reporte_FC_A_Subir.html")
+HTML_SALIDA = r"\\10.10.10.210\AyF_Trabajoadistancia\Compras\Reporte_Maestro.html"
+CACHE_FILE = os.path.join(CARPETA_C, "cache_rutas_facturas.json")
 RUTA_REPORTE_AUTORIZACION = r"\\10.10.10.210\AyF_Trabajoadistancia\AUTORIZACION DE FACTURAS\Reporte.html"
 
-# Rutas donde se buscarán los archivos PDF (incluyendo subcarpetas)
+# Rutas donde se buscarán los archivos PDF
 CARPETAS_BUSQUEDA = [
     r"\\10.10.10.210\AyF_Trabajoadistancia\Compras",
     r"\\10.10.10.210\AyF_Trabajoadistancia\Contabilidad",
@@ -24,6 +26,41 @@ SECTORES_VALIDOS = [
     "PRESIDENCIA", 
     "INTERNET"
 ]
+
+def obtener_facturas_procesadas(ruta_html):
+    """Lee el reporte HTML existente para extraer las facturas ya procesadas y evitar duplicados en el core."""
+    if not os.path.exists(ruta_html):
+        return set()
+    try:
+        df_existente = pd.read_html(ruta_html)[0]
+        procesadas = set()
+        for _, row in df_existente.iterrows():
+            razon_raw = str(row.get('Razón Social', row.get('Razon Social', ''))).strip().upper()
+            razon = re.sub(r'^\([^)]+\)\s*', '', razon_raw).strip()
+            nro = str(row.get('Nro Comprobante', '')).strip()
+            if razon and nro and razon not in ["NAN", "DESCONOCIDO", "PROVEEDOR_DESCONOCIDO", ""] and nro != "NAN":
+                procesadas.add((razon, nro))
+        return procesadas
+    except Exception:
+        return set()
+
+def cargar_cache():
+    """Carga el caché local de rutas para evitar búsquedas repetitivas en la red."""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def guardar_cache(cache):
+    """Guarda el caché local actualizado."""
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"⚠️ Error al guardar el caché local: {e}")
 
 def obtener_estados_autorizacion():
     """Lee el reporte de autorización externo para obtener los estados de las facturas."""
@@ -127,88 +164,154 @@ def parsear_nombre_aprobado(nombre_archivo):
 
 def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
     estados_por_archivo, estados_por_datos = obtener_estados_autorizacion()
+    cache_rutas = cargar_cache()
     
-    datos_actuales = []
-    archivos_procesados = set()
-
-    # Recorrer las 3 carpetas solicitadas recursivamente buscando PDFs
-    for carpeta in CARPETAS_BUSQUEDA:
-        ruta_base = Path(carpeta)
-        if ruta_base.exists():
-            for archivo in ruta_base.rglob("*.pdf"):
-                ruta_completa = str(archivo.absolute())
-                if ruta_completa in archivos_procesados:
-                    continue
-                archivos_procesados.add(ruta_completa)
-
-                info = parsear_nombre_aprobado(archivo.name)
-                fecha_mod = datetime.fromtimestamp(archivo.stat().st_mtime).strftime('%d/%m/%Y %H:%M:%S')
-                
-                # Asignar estado según reporte externo
-                nombre_arch = info["Archivo Original"]
-                rs_key = str(info["Razón Social"]).strip().upper()
-                tipo_key = str(info["Tipo"]).strip().upper()
-                nro_key = str(info["Nro Comprobante"]).strip()
-                
-                estado = "PENDIENTE"
-                if nombre_arch in estados_por_archivo:
-                    estado = estados_por_archivo[nombre_arch]
-                elif (rs_key, tipo_key, nro_key) in estados_por_datos:
-                    estado = estados_por_datos[(rs_key, tipo_key, nro_key)]
-
-                datos_actuales.append({
-                    "Fecha": fecha_mod,
-                    "Empresa": info["Empresa"],
-                    "Razón Social": info["Razón Social"],
-                    "Tipo": info["Tipo"],
-                    "Nro Comprobante": info["Nro Comprobante"],
-                    "OC": info["OC"],
-                    "Información Adicional": info["Información Adicional"],
-                    "Sector": info["Sector"],
-                    "Estado": estado,
-                    "Archivo": info["Archivo Original"],
-                    "Ruta Completa": ruta_completa
-                })
-
-    df_nuevos = pd.DataFrame(datos_actuales)
-
-    df_final = df_nuevos
+    # 1. Obtener histórico (si existe)
     if os.path.exists(ruta_html):
         try:
             df_historico = pd.read_html(ruta_html)[0]
-            for col in df_nuevos.columns:
-                if col not in df_historico.columns:
-                    df_historico[col] = ''
-            df_final = pd.concat([df_historico, df_nuevos], ignore_index=True)
-            df_final['Razón Social'] = df_final['Razón Social'].fillna('DESCONOCIDO')
-            df_final['Nro Comprobante'] = df_final['Nro Comprobante'].fillna('SinNumero')
-            df_final['Estado'] = df_final['Estado'].fillna('PENDIENTE')
-            df_final['Ruta Completa'] = df_final['Ruta Completa'].fillna('')
-            df_final.drop_duplicates(subset=["Razón Social", "Nro Comprobante"], keep="last", inplace=True)
-        except Exception as e:
-            print(f"⚠️ Nota al fusionar con el histórico anterior: {e}")
+        except Exception:
+            df_historico = pd.DataFrame()
+    else:
+        df_historico = pd.DataFrame()
 
-    # Sincronizar estados actualizados del archivo externo en todo el histórico
-    for idx, row in df_final.iterrows():
-        nombre_arch = str(row.get('Archivo', '')).strip()
+    # 2. Escanear 'fc a subir' para encontrar nuevos archivos (SIN subcarpetas)
+    nuevos_datos = []
+    ruta_fc = Path(CARPETA_C)
+    if ruta_fc.exists():
+        for archivo in ruta_fc.glob("*.pdf"):
+            ruta_completa = str(archivo)
+            info = parsear_nombre_aprobado(archivo.name)
+            try:
+                fecha_mod = datetime.fromtimestamp(archivo.stat().st_mtime).strftime('%d/%m/%Y %H:%M:%S')
+            except Exception:
+                fecha_mod = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+            
+            nuevos_datos.append({
+                "Fecha": fecha_mod,
+                "Empresa": info["Empresa"],
+                "Razón Social": info["Razón Social"],
+                "Tipo": info["Tipo"],
+                "Nro Comprobante": info["Nro Comprobante"],
+                "OC": info["OC"],
+                "Información Adicional": info["Información Adicional"],
+                "Sector": info["Sector"],
+                "Archivo": info["Archivo Original"],
+                "Ruta Completa": ruta_completa
+            })
+    
+    df_nuevos = pd.DataFrame(nuevos_datos)
+    
+    # 3. Unir histórico y nuevos para tener la lista de "rastreados"
+    if not df_historico.empty and not df_nuevos.empty:
+        for col in df_nuevos.columns:
+            if col not in df_historico.columns:
+                df_historico[col] = ''
+        df_tracked = pd.concat([df_historico, df_nuevos], ignore_index=True)
+    elif not df_nuevos.empty:
+        df_tracked = df_nuevos
+    else:
+        df_tracked = df_historico
+
+    if df_tracked.empty:
+        print("⚠️ No hay datos en histórico ni en fc a subir para mostrar.")
+        return
+
+    df_tracked['Razón Social'] = df_tracked['Razón Social'].fillna('DESCONOCIDO')
+    df_tracked['Nro Comprobante'] = df_tracked['Nro Comprobante'].fillna('SinNumero')
+    
+    # Desduplicar preliminar
+    df_tracked.drop_duplicates(subset=["Razón Social", "Nro Comprobante"], keep="last", inplace=True)
+
+    # 4. Crear un diccionario de rastreados para búsqueda rápida
+    rastreados = set()
+    for _, row in df_tracked.iterrows():
+        rs_key = str(row.get('Razón Social', '')).strip().upper()
+        nro_key = str(row.get('Nro Comprobante', '')).strip()
+        rastreados.add((rs_key, nro_key))
+
+    # 5. Buscar gemelos en carpetas contables (SIN subcarpetas)
+    etapas_encontradas = {} 
+    
+    CARPETAS_CONFIG = [
+        (r"\\10.10.10.210\AyF_Trabajoadistancia\Facturas a pagar\2026", True),
+        (r"\\10.10.10.210\AyF_Trabajoadistancia\Facturas a pagar\Periodo Actual", True),
+        (r"\\10.10.10.210\AyF_Trabajoadistancia\Contabilidad", False),
+        (r"\\10.10.10.210\AyF_Trabajoadistancia\Compras", False)
+    ]
+
+    for carpeta, recursiva in CARPETAS_CONFIG:
+        ruta_base = Path(carpeta)
+        if not ruta_base.exists(): continue
+        
+        archivos_pdf = ruta_base.rglob("*.pdf") if recursiva else ruta_base.glob("*.pdf")
+        
+        for archivo in archivos_pdf:
+            ruta_completa = str(archivo)
+            info = parsear_nombre_aprobado(archivo.name)
+            
+            rs_key = str(info["Razón Social"]).strip().upper()
+            nro_key = str(info["Nro Comprobante"]).strip()
+            
+            if (rs_key, nro_key) in rastreados:
+                ruta_upper = ruta_completa.upper()
+                etapa_contable = "OTRA"
+                nivel_etapa = 0
+
+                if r"FACTURAS A PAGAR\2026" in ruta_upper:
+                    etapa_contable = "PAGADA"
+                    nivel_etapa = 4
+                elif r"FACTURAS A PAGAR\PERIODO ACTUAL" in ruta_upper:
+                    etapa_contable = "PARA PAGAR"
+                    nivel_etapa = 3
+                elif r"\CONTABILIDAD" in ruta_upper:
+                    etapa_contable = "CONTABILIZADA"
+                    nivel_etapa = 2
+                elif r"\COMPRAS" in ruta_upper:
+                    etapa_contable = "ENTRADA"
+                    nivel_etapa = 1
+
+                if (rs_key, nro_key) not in etapas_encontradas or nivel_etapa > etapas_encontradas[(rs_key, nro_key)][0]:
+                    etapas_encontradas[(rs_key, nro_key)] = (nivel_etapa, etapa_contable, ruta_completa)
+
+    # 6. Actualizar dataframe con etapas y estados
+    df_tracked['Nivel Etapa'] = 0
+    df_tracked['Etapa Contable'] = 'ENTRADA'
+    df_tracked['Estado'] = 'N/A'
+
+    for idx, row in df_tracked.iterrows():
         rs_key = str(row.get('Razón Social', '')).strip().upper()
         tipo_key = str(row.get('Tipo', '')).strip().upper()
         nro_key = str(row.get('Nro Comprobante', '')).strip()
-        
+        nombre_arch = str(row.get('Archivo', '')).strip()
+
+        # Actualizar Etapa Contable desde gemelos
+        if (rs_key, nro_key) in etapas_encontradas:
+            nivel, etapa, ruta = etapas_encontradas[(rs_key, nro_key)]
+            df_tracked.at[idx, 'Nivel Etapa'] = nivel
+            df_tracked.at[idx, 'Etapa Contable'] = etapa
+            df_tracked.at[idx, 'Ruta Completa'] = ruta
+        else:
+            df_tracked.at[idx, 'Etapa Contable'] = 'ENTRADA'
+            df_tracked.at[idx, 'Nivel Etapa'] = 1
+            # Si no encontró gemelo en otras carpetas, asumimos que su ruta es la que teníamos
+            df_tracked.at[idx, 'Ruta Completa'] = row.get('Ruta Completa', '')
+
+        # Actualizar Estado desde Autorización (N/A por defecto)
+        estado = "N/A"
         if nombre_arch in estados_por_archivo:
-            df_final.at[idx, 'Estado'] = estados_por_archivo[nombre_arch]
+            estado = estados_por_archivo[nombre_arch]
         elif (rs_key, tipo_key, nro_key) in estados_por_datos:
-            df_final.at[idx, 'Estado'] = estados_por_datos[(rs_key, tipo_key, nro_key)]
+            estado = estados_por_datos[(rs_key, tipo_key, nro_key)]
+        df_tracked.at[idx, 'Estado'] = estado
 
-    if df_final.empty:
-        print("⚠️ No hay datos para mostrar en el reporte.")
-        return
-
+    df_final = df_tracked.sort_values(by=["Razón Social", "Nro Comprobante", "Nivel Etapa"], ascending=[True, True, True])
+    df_final.drop_duplicates(subset=["Razón Social", "Nro Comprobante"], keep="last", inplace=True)
+    
     if "Fecha" in df_final.columns:
         df_final = df_final.sort_values(by="Fecha", ascending=False)
 
     timestamp_actual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    
     html_content = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -230,7 +333,6 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
         th {{ background-color: #0d6efd; color: white; }}
         tr:hover {{ background-color: #f1f1f1; }}
         .footer {{ margin-top: 20px; font-size: 12px; color: #777; text-align: right; }}
-        /* Estilo para los buscadores situados en la parte superior */
         thead input {{
             width: 100%;
             padding: 4px;
@@ -264,6 +366,7 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
                         <th>Información Adicional</th>
                         <th>Sector</th>
                         <th>Estado</th>
+                        <th>Etapa Contable</th>
                         <th>Archivo</th>
                         <th>Ruta Completa</th>
                     </tr>
@@ -277,6 +380,7 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
                         <th><input type="text" placeholder="Filtrar Info Adicional" /></th>
                         <th><input type="text" placeholder="Filtrar Sector" /></th>
                         <th><input type="text" placeholder="Filtrar Estado" /></th>
+                        <th><input type="text" placeholder="Filtrar Etapa" /></th>
                         <th><input type="text" placeholder="Filtrar Archivo" /></th>
                         <th><input type="text" placeholder="Filtrar Ruta Completa" /></th>
                     </tr>
@@ -291,7 +395,19 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
         elif "REVIS" in estado_val:
             badge_estado = '<span class="badge bg-warning text-dark">A REVISIÓN</span>'
         else:
-            badge_estado = '<span class="badge bg-secondary">PENDIENTE</span>'
+            badge_estado = '<span class="badge bg-danger">N/A</span>' if estado_val == "N/A" else '<span class="badge bg-secondary">PENDIENTE</span>'
+
+        etapa_val = str(row.get('Etapa Contable', 'OTRA')).strip().upper()
+        if etapa_val == "PAGADA":
+            badge_etapa = '<span class="badge bg-success">PAGADA</span>'
+        elif etapa_val == "PARA PAGAR":
+            badge_etapa = '<span class="badge bg-primary">PARA PAGAR</span>'
+        elif etapa_val == "CONTABILIZADA":
+            badge_etapa = '<span class="badge bg-info text-dark">CONTABILIZADA</span>'
+        elif etapa_val == "ENTRADA":
+            badge_etapa = '<span class="badge bg-secondary">ENTRADA</span>'
+        else:
+            badge_etapa = '<span class="badge bg-light text-dark">OTRA</span>'
 
         html_content += f"""
                     <tr>
@@ -304,6 +420,7 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
                         <td>{row.get('Información Adicional', '')}</td>
                         <td><span class="badge bg-info text-dark">{row.get('Sector', 'GENERAL')}</span></td>
                         <td>{badge_estado}</td>
+                        <td>{badge_etapa}</td>
                         <td>{row.get('Archivo', '')}</td>
                         <td style="font-family: monospace; font-size: 0.75rem; word-break: break-all;">{row.get('Ruta Completa', '')}</td>
                     </tr>
@@ -330,7 +447,6 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
                 "order": []
             }});
 
-            // Aplicar el filtrado por columna leyendo los inputs de la segunda fila del thead
             $('#tabla_reporte thead tr:eq(1) input').on('keyup change clear', function () {{
                 var index = $(this).parent().index();
                 if (table.column(index).search() !== this.value) {{
@@ -346,4 +462,7 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
     with open(ruta_html, "w", encoding="utf-8") as f:
         f.write(html_content)
         
-    print(f"🌐 Reporte acumulativo actualizado con éxito en: {ruta_html} (Total registros: {len(df_final)})")
+    print(f"Reporte acumulativo actualizado con exito en: {ruta_html} (Total registros: {len(df_final)})")
+
+if __name__ == "__main__":
+    generar_reporte_html()

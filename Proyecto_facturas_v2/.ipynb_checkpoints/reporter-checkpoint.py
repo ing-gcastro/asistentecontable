@@ -1,14 +1,16 @@
 import os
 import re
+import json
 from pathlib import Path
 from datetime import datetime
 import pandas as pd
 from config import CARPETA_C  # Ruta donde se guardará el reporte HTML de salida
 
 HTML_SALIDA = os.path.join(CARPETA_C, "Reporte_FC_A_Subir.html")
+CACHE_FILE = os.path.join(CARPETA_C, "cache_rutas_facturas.json")
 RUTA_REPORTE_AUTORIZACION = r"\\10.10.10.210\AyF_Trabajoadistancia\AUTORIZACION DE FACTURAS\Reporte.html"
 
-# Rutas donde se buscarán los archivos PDF (incluyendo subcarpetas)
+# Rutas donde se buscarán los archivos PDF
 CARPETAS_BUSQUEDA = [
     r"\\10.10.10.210\AyF_Trabajoadistancia\Compras",
     r"\\10.10.10.210\AyF_Trabajoadistancia\Contabilidad",
@@ -24,6 +26,41 @@ SECTORES_VALIDOS = [
     "PRESIDENCIA", 
     "INTERNET"
 ]
+
+def obtener_facturas_procesadas(ruta_html):
+    """Lee el reporte HTML existente para extraer las facturas ya procesadas y evitar duplicados en el core."""
+    if not os.path.exists(ruta_html):
+        return set()
+    try:
+        df_existente = pd.read_html(ruta_html)[0]
+        procesadas = set()
+        for _, row in df_existente.iterrows():
+            razon_raw = str(row.get('Razón Social', row.get('Razon Social', ''))).strip().upper()
+            razon = re.sub(r'^\([^)]+\)\s*', '', razon_raw).strip()
+            nro = str(row.get('Nro Comprobante', '')).strip()
+            if razon and nro and razon not in ["NAN", "DESCONOCIDO", "PROVEEDOR_DESCONOCIDO", ""] and nro != "NAN":
+                procesadas.add((razon, nro))
+        return procesadas
+    except Exception:
+        return set()
+
+def cargar_cache():
+    """Carga el caché local de rutas para evitar búsquedas repetitivas en la red."""
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def guardar_cache(cache):
+    """Guarda el caché local actualizado."""
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"⚠️ Error al guardar el caché local: {e}")
 
 def obtener_estados_autorizacion():
     """Lee el reporte de autorización externo para obtener los estados de las facturas."""
@@ -127,48 +164,69 @@ def parsear_nombre_aprobado(nombre_archivo):
 
 def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
     estados_por_archivo, estados_por_datos = obtener_estados_autorizacion()
+    cache_rutas = cargar_cache()
     
     datos_actuales = []
     archivos_procesados = set()
+    
+    ahora = datetime.now().timestamp()
+    limite_antiguedad = 60 * 24 * 60 * 60  # 60 días sin cambios para considerar carpeta estable
 
-    # Recorrer las 3 carpetas solicitadas recursivamente buscando PDFs
     for carpeta in CARPETAS_BUSQUEDA:
         ruta_base = Path(carpeta)
-        if ruta_base.exists():
-            for archivo in ruta_base.rglob("*.pdf"):
-                ruta_completa = str(archivo.absolute())
-                if ruta_completa in archivos_procesados:
-                    continue
-                archivos_procesados.add(ruta_completa)
+        if not ruta_base.exists():
+            continue
+        
+        for root, dirs, files in os.walk(ruta_base):
+            root_path = Path(root)
+            
+            try:
+                if root_path != ruta_base and (ahora - root_path.stat().st_mtime) > limite_antiguedad:
+                    dirs.clear()
+            except Exception:
+                pass
 
-                info = parsear_nombre_aprobado(archivo.name)
-                fecha_mod = datetime.fromtimestamp(archivo.stat().st_mtime).strftime('%d/%m/%Y %H:%M:%S')
-                
-                # Asignar estado según reporte externo
-                nombre_arch = info["Archivo Original"]
-                rs_key = str(info["Razón Social"]).strip().upper()
-                tipo_key = str(info["Tipo"]).strip().upper()
-                nro_key = str(info["Nro Comprobante"]).strip()
-                
-                estado = "PENDIENTE"
-                if nombre_arch in estados_por_archivo:
-                    estado = estados_por_archivo[nombre_arch]
-                elif (rs_key, tipo_key, nro_key) in estados_por_datos:
-                    estado = estados_por_datos[(rs_key, tipo_key, nro_key)]
+            for file in files:
+                if file.lower().endswith('.pdf'):
+                    ruta_completa = str(root_path / file)
+                    if ruta_completa in archivos_procesados:
+                        continue
+                    archivos_procesados.add(ruta_completa)
+                    
+                    cache_rutas[file] = ruta_completa
 
-                datos_actuales.append({
-                    "Fecha": fecha_mod,
-                    "Empresa": info["Empresa"],
-                    "Razón Social": info["Razón Social"],
-                    "Tipo": info["Tipo"],
-                    "Nro Comprobante": info["Nro Comprobante"],
-                    "OC": info["OC"],
-                    "Información Adicional": info["Información Adicional"],
-                    "Sector": info["Sector"],
-                    "Estado": estado,
-                    "Archivo": info["Archivo Original"],
-                    "Ruta Completa": ruta_completa
-                })
+                    info = parsear_nombre_aprobado(file)
+                    try:
+                        fecha_mod = datetime.fromtimestamp(os.path.getmtime(ruta_completa)).strftime('%d/%m/%Y %H:%M:%S')
+                    except Exception:
+                        fecha_mod = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+                    
+                    nombre_arch = info["Archivo Original"]
+                    rs_key = str(info["Razón Social"]).strip().upper()
+                    tipo_key = str(info["Tipo"]).strip().upper()
+                    nro_key = str(info["Nro Comprobante"]).strip()
+                    
+                    estado = "PENDIENTE"
+                    if nombre_arch in estados_por_archivo:
+                        estado = estados_por_archivo[nombre_arch]
+                    elif (rs_key, tipo_key, nro_key) in estados_por_datos:
+                        estado = estados_por_datos[(rs_key, tipo_key, nro_key)]
+
+                    datos_actuales.append({
+                        "Fecha": fecha_mod,
+                        "Empresa": info["Empresa"],
+                        "Razón Social": info["Razón Social"],
+                        "Tipo": info["Tipo"],
+                        "Nro Comprobante": info["Nro Comprobante"],
+                        "OC": info["OC"],
+                        "Información Adicional": info["Información Adicional"],
+                        "Sector": info["Sector"],
+                        "Estado": estado,
+                        "Archivo": info["Archivo Original"],
+                        "Ruta Completa": ruta_completa
+                    })
+
+    guardar_cache(cache_rutas)
 
     df_nuevos = pd.DataFrame(datos_actuales)
 
@@ -188,7 +246,6 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
         except Exception as e:
             print(f"⚠️ Nota al fusionar con el histórico anterior: {e}")
 
-    # Sincronizar estados actualizados del archivo externo en todo el histórico
     for idx, row in df_final.iterrows():
         nombre_arch = str(row.get('Archivo', '')).strip()
         rs_key = str(row.get('Razón Social', '')).strip().upper()
@@ -230,7 +287,6 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
         th {{ background-color: #0d6efd; color: white; }}
         tr:hover {{ background-color: #f1f1f1; }}
         .footer {{ margin-top: 20px; font-size: 12px; color: #777; text-align: right; }}
-        /* Estilo para los buscadores situados en la parte superior */
         thead input {{
             width: 100%;
             padding: 4px;
@@ -330,7 +386,6 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
                 "order": []
             }});
 
-            // Aplicar el filtrado por columna leyendo los inputs de la segunda fila del thead
             $('#tabla_reporte thead tr:eq(1) input').on('keyup change clear', function () {{
                 var index = $(this).parent().index();
                 if (table.column(index).search() !== this.value) {{
