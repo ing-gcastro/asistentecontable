@@ -11,13 +11,18 @@ from proveedores import cargar_excel_proveedores, buscar_proveedor
 from downloader import descargar_facturas_outlook
 from reporter import generar_reporte_html, obtener_facturas_procesadas
 from proveedor_rules import es_factura_por_remitente, analizar_pdf_ecosan
+import oc_manager
 
 def es_factura_valida(texto_lower, remitente=""):
     if es_factura_por_remitente(remitente):
         return True
+        
+    texto_seguro = texto_lower.replace("presupuesto económico", "").replace("presupuesto economico", "")
+    
     for prohibida in REGLAS_EXTRACCION["palabras_prohibidas"]:
-        if prohibida.lower() in texto_lower: 
+        if prohibida.lower() in texto_seguro: 
             return False
+            
     texto_sin_espacios_raros = re.sub(r'[\s\n\r\t:\-\._\|]+', '', texto_lower)
     if "cae" in texto_sin_espacios_raros:
         return True
@@ -31,7 +36,9 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
         texto_original = "\n".join([pagina.get_text("text", sort=True) for pagina in doc])
         texto_lower = texto_original.lower()
         doc.close()
-        
+        if not texto_lower.strip():
+            return False, "PDF vacío o imagen"
+            
         if not es_factura_valida(texto_lower, remitente):
             return False, "Documento descartado (No tiene CAE o contiene palabras prohibidas)"
             
@@ -42,18 +49,30 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
             tipo = "ND"
         
         nro = "SinNumero"
-        m_arca = re.search(r"(?:Comp\.?\s*Nro\.?|Nro\.?|Número)\s*[:\.]?\s*(\d{4,8})", texto_original, re.IGNORECASE)
-        if m_arca:
-            nro = str(int(m_arca.group(1)))
+        
+        # 1. Intentar el formato estándar XXXX-XXXXXXXX primero
+        m_exacto = re.search(r"\b\d{4,5}\s*[-]\s*(\d{8})\b", texto_original)
+        if m_exacto:
+            nro = str(int(m_exacto.group(1)))
         else:
-            m_comp = re.search(REGLAS_EXTRACCION["rx_numero_comp"], texto_original, re.IGNORECASE)
-            if m_comp: 
-                nro_crudo = m_comp.group(1).replace("-", "").replace(" ", "")
-                nro = str(int(nro_crudo[-8:]))
+            # 1.5 Intentar el formato con letra en el medio: 0070A00371583
+            m_letra = re.search(r"\b\d{4,5}[A-Za-z](\d{8})\b", texto_original)
+            if m_letra:
+                nro = str(int(m_letra.group(1)))
             else:
-                m_guion = re.search(REGLAS_EXTRACCION["rx_numero_guion"], texto_original)
-                if m_guion: 
-                    nro = str(int(m_guion.group(1)))
+                # 2. Intentar buscar el texto "Nro:" 
+                m_arca = re.search(r"(?:Comp\.?\s*Nro\.?|Nro\.?|Número)\s*[:\.]?\s*(\d{4,8})", texto_original, re.IGNORECASE)
+                if m_arca:
+                    nro = str(int(m_arca.group(1)))
+                else:
+                    m_comp = re.search(REGLAS_EXTRACCION["rx_numero_comp"], texto_original, re.IGNORECASE)
+                    if m_comp: 
+                        nro_crudo = m_comp.group(1).replace("-", "").replace(" ", "")
+                        nro = str(int(nro_crudo[-8:]))
+                    else:
+                        m_guion = re.search(REGLAS_EXTRACCION["rx_numero_guion"], texto_original)
+                        if m_guion: 
+                            nro = str(int(m_guion.group(1)))
             
         razon_social = ""
         m_razon = re.search(REGLAS_EXTRACCION["rx_razon_social"], texto_original, re.IGNORECASE)
@@ -139,7 +158,7 @@ def obtener_ultima_fecha_procesada(ruta_html):
     return None
 
 def iniciar_proceso_interactivo(ejecutar_descarga=False, usar_filtro_fecha=True, fecha_inicio="01/07/2026", fecha_fin="", filtro_correo=""):
-    ruta_html_reporte = os.path.join(CARPETA_C, "Reporte_Facturas.html")
+    ruta_html_reporte = r"\\10.10.10.210\AyF_Trabajoadistancia\Compras\Reporte_Maestro.html"
     
     ultima_fecha_historica = obtener_ultima_fecha_procesada(ruta_html_reporte)
     fecha_a_utilizar = ultima_fecha_historica if ultima_fecha_historica else fecha_inicio
@@ -186,11 +205,6 @@ def iniciar_proceso_interactivo(ejecutar_descarga=False, usar_filtro_fecha=True,
             
         ruta_completa = os.path.join(CARPETA_A, archivo)
         
-        if usar_filtro_fecha and f_ini:
-            fecha_archivo = datetime.fromtimestamp(os.path.getmtime(ruta_completa)).date()
-            if fecha_archivo < f_ini or fecha_archivo > f_fin:
-                continue
-
         remitente_correo = mapa_remitentes.get(archivo, "")
 
         match_marino = re.search(r'(?:VOLQUETES.*?MARINO|MARINO).*?(\d+)', archivo, re.IGNORECASE)
@@ -205,11 +219,27 @@ def iniciar_proceso_interactivo(ejecutar_descarga=False, usar_filtro_fecha=True,
         es_valido, datos = extraer_datos_pdf(ruta_completa, remitente_correo)
         
         if not es_valido:
-            for r_fusa in archivos_a_fusionar:
-                destino_b = obtener_ruta_unica(os.path.join(CARPETA_B, os.path.basename(r_fusa)))
-                shutil.move(r_fusa, destino_b)
-            print(f"[-] {archivo} -> NO ES FACTURA. Movido a Carpeta B.")
-            continue
+            if "vacío" in datos or "imagen" in datos:
+                print(f"\n⚠️ ATENCIÓN: {archivo} parece ser un PDF escaneado o imagen (no se pudo leer el texto).")
+                opc = input("¿Deseas procesarlo manualmente como factura? (s/n): ").strip().lower()
+                if opc == 's':
+                    es_valido = True
+                    datos = {"tipo": "FC", "numero": "SinNumero", "razon_social": "PROVEEDOR_DESCONOCIDO", "cuit": ""}
+                    # Intentar rescatar el número desde el nombre del archivo
+                    m_exacto = re.search(r"\b\d{4,5}\s*[-_]\s*(\d{8})\b", archivo)
+                    if m_exacto:
+                        datos["numero"] = str(int(m_exacto.group(1)))
+                    else:
+                        m_arca = re.search(r"(\d{4,8})\.pdf$", archivo, re.IGNORECASE)
+                        if m_arca:
+                            datos["numero"] = str(int(m_arca.group(1)))
+            
+            if not es_valido:
+                for r_fusa in archivos_a_fusionar:
+                    destino_b = obtener_ruta_unica(os.path.join(CARPETA_B, os.path.basename(r_fusa)))
+                    shutil.move(r_fusa, destino_b)
+                print(f"[-] {archivo} -> NO ES FACTURA. Movido automáticamente a Carpeta B.")
+                continue
             
         nombre_final, sector, es_negra = buscar_proveedor(datos.get("cuit", ""), datos["razon_social"], base_prov)
         
@@ -272,14 +302,49 @@ def iniciar_proceso_interactivo(ejecutar_descarga=False, usar_filtro_fecha=True,
             for r_fusa in archivos_a_fusionar:
                 destino_b = obtener_ruta_unica(os.path.join(CARPETA_B, os.path.basename(r_fusa)))
                 shutil.move(r_fusa, destino_b)
-            print(f"❌ Archivo rechazado y movido a Carpeta B.")
+            print("❌ Rechazado. Movido a Carpeta B.")
             continue
             
         elif opcion == 'e':
-            nuevo_input = input("Escribe el nombre final del archivo (sin .pdf): ").strip()
+            nuevo_input = input(f"Escribe el nuevo nombre (sin .pdf) o presiona Enter para usar '{nombre_sugerido}': ").strip()
             if nuevo_input:
-                nombre_sugerido = f"{nuevo_input}.pdf"
+                if not nuevo_input.lower().endswith('.pdf'):
+                    nombre_sugerido = f"{nuevo_input}.pdf"
+                else:
+                    nombre_sugerido = nuevo_input
+                    
+        # --- INTEGRACIÓN DE ÓRDENES DE COMPRA (OC) ---
+        print("\n[DEBUG] Iniciando búsqueda de OCs...")
+        cuit_busq = datos.get("cuit", "")
+        ocs_disponibles = oc_manager.leer_oc_disponibles(cuit_busq, nombre_final)
+        print(f"[DEBUG] OCs devueltas por el manager: {len(ocs_disponibles)}")
+        
+        if ocs_disponibles:
+            print(f"\n🛒 OCs disponibles para {nombre_final}:")
+            for i, oc in enumerate(ocs_disponibles, 1):
+                print(f"  {i}) OC {oc['nro_oc']} | {oc['fecha']} | {oc['articulo']} | Tipo: {oc['tipo']}")
                 
+            oc_elegida = input("Escribe el Nro de OC a vincular (o presiona Enter para omitir): ").strip()
+            
+            if oc_elegida:
+                oc_encontrada = next((o for o in ocs_disponibles if o['nro_oc'].lower() == oc_elegida.lower()), None)
+                if oc_encontrada:
+                    ruta_pdf_oc = oc_manager.buscar_pdf_oc(oc_encontrada['nro_oc'])
+                    if ruta_pdf_oc:
+                        print(f"✅ Se adjuntará el PDF de la OC: {os.path.basename(ruta_pdf_oc)}")
+                        archivos_a_fusionar.append(ruta_pdf_oc)
+                        
+                        # Agregar sufijo al nombre
+                        base_n, ext_n = os.path.splitext(nombre_sugerido)
+                        nombre_sugerido = f"{base_n} -OC {oc_encontrada['nro_oc']}{ext_n}"
+                        
+                        # Registrar consumo
+                        oc_manager.registrar_consumo_oc(oc_encontrada['nro_oc'], nombre_sugerido)
+                    else:
+                        print(f"⚠️ No se encontró el archivo PDF para la OC {oc_encontrada['nro_oc']} en la red. Se omitirá la fusión de la OC.")
+                else:
+                    print("⚠️ Nro de OC no coincide con la lista. Se omitirá.")
+                    
         nombre_limpio = re.sub(r'[\\/*?:"<>|]', "", nombre_sugerido)
         ruta_destino_c = obtener_ruta_unica(os.path.join(CARPETA_C, nombre_limpio))
         

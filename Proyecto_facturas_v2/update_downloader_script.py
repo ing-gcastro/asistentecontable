@@ -1,4 +1,6 @@
-# downloader.py
+import os
+
+new_code = r"""# downloader.py
 import os
 import win32com.client
 from datetime import datetime
@@ -34,39 +36,21 @@ def excel_a_pdf(excel_path, pdf_path):
         excel.Quit()
         return True
     except Exception as e:
-        print(f"Error convirtiendo Excel a PDF {excel_path}: {e}")
+        print(f"⚠️ Error convirtiendo Excel a PDF {excel_path}: {e}")
         try:
             excel.Quit()
         except:
             pass
         return False
 
-import json
-
-ESTADO_EMAILS = r"c:\Users\gcastro\ROBOTS\asistentecontable\Proyecto_facturas_v2\emails_procesados.json"
-
-def cargar_procesados():
-    if os.path.exists(ESTADO_EMAILS):
-        try:
-            with open(ESTADO_EMAILS, "r") as f:
-                return set(json.load(f))
-        except:
-            return set()
-    return set()
-
-def guardar_procesado(entry_id, procesados_set):
-    procesados_set.add(entry_id)
-    with open(ESTADO_EMAILS, "w") as f:
-        json.dump(list(procesados_set), f)
-
 def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
-    print(f"Conectando a Outlook (Carpeta: Compras)...")
+    print(f"🔄 Conectando a Outlook (Carpeta: Compras)...")
     
     try:
         outlook = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
         carpeta = outlook.Folders["Compras"]
     except Exception as e:
-        print(f"ERROR: No se encontro la carpeta 'Compras' en Outlook. Detalles: {e}")
+        print(f"❌ ERROR: No se encontró la carpeta 'Compras' en Outlook. Detalles: {e}")
         return {}
         
     mensajes = carpeta.Items
@@ -80,12 +64,11 @@ def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
     f_correo = filtro_proveedor.strip().lower()
 
     mapa_remitentes = {}
-    print(f"Buscando correos en Outlook y descargando adjuntos a: {CARPETA_A}\n")
+    print(f"📥 Buscando correos en Outlook y descargando adjuntos a: {CARPETA_A}\n")
 
+    # Carpeta temporal para procesamiento
     temp_dir = os.path.join(CARPETA_A, "temp_descargas")
     os.makedirs(temp_dir, exist_ok=True)
-    
-    procesados = cargar_procesados()
 
     for msg in mensajes:
         try:
@@ -98,17 +81,6 @@ def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
             email = (msg.SenderEmailAddress if msg.SenderEmailType != "EX" else (msg.Sender.GetExchangeUser().PrimarySmtpAddress if msg.Sender.GetExchangeUser() else "desconocido")).lower()
             
             if f_correo and f_correo not in email:
-                continue
-                
-            if "gire" in email or "gire.com" in email:
-                continue
-                
-            # EntryID a veces cambia en Outlook cacheado, usamos Fecha+Asunto para estar 100% seguros
-            asunto_limpio = msg.Subject.replace('\r', '').replace('\n', '')[:50] if msg.Subject else "sin_asunto"
-            fecha_str = msg.ReceivedTime.strftime('%Y%m%d%H%M%S')
-            entry_id = f"{fecha_str}_{asunto_limpio}"
-            
-            if entry_id in procesados:
                 continue
                 
             if msg.Attachments.Count > 0:
@@ -128,11 +100,11 @@ def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
                         adjuntos_excel.append(r)
 
                 if not adjuntos_pdf and not adjuntos_excel:
-                    guardar_procesado(entry_id, procesados)
                     continue
 
                 # REGLA MARINO: Unir múltiples PDFs
                 if "facturacion@marinosa.com.ar" in email and len(adjuntos_pdf) > 0:
+                    # Buscar el que tiene FAC para usar de nombre base
                     base_pdf = adjuntos_pdf[0]
                     for p in adjuntos_pdf:
                         if "fac" in os.path.basename(p).lower():
@@ -144,20 +116,20 @@ def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
                     
                     if len(adjuntos_pdf) > 1:
                         fusionar_pdfs(adjuntos_pdf, ruta_final)
-                        print(f"[Descargado/Fusionado MARINO] {nombre_final}")
+                        print(f"[📥 Descargado/Fusionado MARINO] {nombre_final}")
                     else:
                         os.rename(adjuntos_pdf[0], ruta_final)
-                        print(f"[Descargado MARINO] {nombre_final}")
+                        print(f"[📥 Descargado MARINO] {nombre_final}")
                         
                     mapa_remitentes[os.path.basename(ruta_final)] = email
                     descargados += 1
-                    guardar_procesado(entry_id, procesados)
 
                 # REGLA REDGUARD / AQUALINE: Excel a PDF y fusionar
                 elif ("facturacion@redguard.com.ar" in email or "facturacion@aqualine.com.ar" in email) and len(adjuntos_pdf) > 0:
                     base_pdf = adjuntos_pdf[0]
                     pdfs_a_fusionar = [base_pdf]
                     
+                    # Convertir Excel
                     for exc in adjuntos_excel:
                         pdf_gen = exc + ".pdf"
                         if excel_a_pdf(exc, pdf_gen):
@@ -168,14 +140,13 @@ def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
                     
                     if len(pdfs_a_fusionar) > 1:
                         fusionar_pdfs(pdfs_a_fusionar, ruta_final)
-                        print(f"[Descargado/Fusionado con Excel] {nombre_final}")
+                        print(f"[📥 Descargado/Fusionado con Excel] {nombre_final}")
                     else:
                         os.rename(base_pdf, ruta_final)
-                        print(f"[Descargado] {nombre_final}")
+                        print(f"[📥 Descargado] {nombre_final}")
                         
                     mapa_remitentes[os.path.basename(ruta_final)] = email
                     descargados += 1
-                    guardar_procesado(entry_id, procesados)
 
                 # DESCARGA NORMAL
                 else:
@@ -184,24 +155,27 @@ def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
                         ruta_final = obtener_ruta_unica(os.path.join(CARPETA_A, nombre_final))
                         os.rename(p, ruta_final)
                         mapa_remitentes[os.path.basename(ruta_final)] = email
-                        print(f"[Descargado] {nombre_final}")
+                        print(f"[📥 Descargado] {nombre_final}")
                         descargados += 1
-                    guardar_procesado(entry_id, procesados)
                         
+                # Limpiar temporales
                 for f in os.listdir(temp_dir):
                     try:
                         os.remove(os.path.join(temp_dir, f))
                     except:
                         pass
-            else:
-                guardar_procesado(entry_id, procesados)
         except Exception:
             continue
             
+    # Borrar carpeta temporal si está vacía
     try:
         os.rmdir(temp_dir)
     except:
         pass
         
-    print(f"\n¡Descarga finalizada! Se obtuvieron {descargados} PDFs nuevos.")
+    print(f"\n✅ ¡Descarga finalizada! Se obtuvieron {descargados} PDFs nuevos.")
     return mapa_remitentes
+"""
+
+with open(r"c:\Users\gcastro\ROBOTS\asistentecontable\Proyecto_facturas_v2\downloader.py", "w", encoding="utf-8") as f:
+    f.write(new_code)

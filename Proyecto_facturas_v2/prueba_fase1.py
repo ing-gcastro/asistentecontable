@@ -131,7 +131,7 @@ def obtener_ultima_fecha_procesada(ruta_html):
     return None
 
 def iniciar_proceso_interactivo():
-    ruta_html_reporte = os.path.join(CARPETA_C, "Reporte_Facturas.html")
+    ruta_html_reporte = r"\\10.10.10.210\AyF_Trabajoadistancia\Compras\Reporte_Maestro.html"
     
     # Auto-detección del punto de partida inteligente
     ultima_fecha_historica = obtener_ultima_fecha_procesada(ruta_html_reporte)
@@ -180,11 +180,6 @@ def iniciar_proceso_interactivo():
             
         ruta_completa = os.path.join(CARPETA_A, archivo)
         
-        if USAR_FILTRO_FECHA and f_ini:
-            fecha_archivo = datetime.fromtimestamp(os.path.getmtime(ruta_completa)).date()
-            if fecha_archivo < f_ini or fecha_archivo > f_fin:
-                continue
-
         remitente_correo = mapa_remitentes.get(archivo, "")
 
         # Excepción de agrupación de múltiples PDFs (ej: Transportes Marino)
