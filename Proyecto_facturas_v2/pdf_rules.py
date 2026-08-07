@@ -8,7 +8,7 @@ REGLAS_EXTRACCION = {
         "DUPLICADO DE RECIBO"
     ],
     # Tolerancia total a saltos de línea y símbolos entre la palabra CAE y los 14-15 dígitos
-    "rx_cae": r"C\.?[A-ZÀ-ÿ]\.?\.?E\.?[\sN°:\.\|]*\n?\s*\|?\s*(\d{14,15})",
+    "rx_cae": r"C[.\s]*A[.\s]*E[.\s]*[:\s\|N°]*\n?\s*\|?\s*(\d{14,15})",
     "rx_nota_credito": r"NOTA\s*DE\s*CREDITO",
     "rx_nota_debito": r"NOTA\s*DE\s*DEBITO",
     "rx_numero_comp": r"(?:A|B|C)?[-]?\d{4}[-]?(\d{8})",

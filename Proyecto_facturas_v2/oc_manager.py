@@ -1,12 +1,7 @@
 import os
 import json
 import pandas as pd
-from config import CARPETA_B
-
-# Base de datos de OC
-OC_DB_PATH = r"C:\Users\gcastro\ROBOTS\data\Comprobantes de Compras (Órdenes de Compras).xls"
-# Archivo de seguimiento
-ESTADO_OC_PATH = r"C:\Users\gcastro\ROBOTS\asistentecontable\Proyecto_facturas_v2\estado_oc.json"
+from config import CARPETA_B, OC_DB_PATH, ESTADO_OC_PATH, CONSUMIDAS_PATH, CARPETA_OC
 
 def cargar_estado_oc():
     if os.path.exists(ESTADO_OC_PATH):
@@ -46,7 +41,7 @@ def leer_oc_disponibles(proveedor_cuit, proveedor_nombre):
     
     # --- FILTRAR CONSUMIDAS MANUALMENTE ---
     try:
-        df_cons = pd.read_excel(r"C:\Users\gcastro\ROBOTS\data\consumidas.xlsx")
+        df_cons = pd.read_excel(CONSUMIDAS_PATH)
         # Obtener lista de OCs consumidas (ignorando nulos y limpiando strings)
         ocs_consumidas_manual = [str(x).strip() for x in df_cons[df_cons['consumida'].notna()]['NoComprobante'].tolist()]
     except Exception as e:
@@ -69,9 +64,9 @@ def leer_oc_disponibles(proveedor_cuit, proveedor_nombre):
         if not nro_oc:
             continue
             
-        # Al no existir la columna de Tipo de Consumo en la DB real, asumimos Servicio (S) temporalmente 
-        # para que no desaparezca en el primer uso hasta que definamos cómo distinguirlo
-        tipo = "S" 
+        # Intentar leer tipo desde el Excel; fallback a "S" si no existe la columna
+        tipo_raw = str(row.get("TipoConsumo", row.get("Tipo", "S"))).strip().upper()
+        tipo = tipo_raw if tipo_raw in ("B", "S") else "S"
         
         consumos = estado_oc.get(nro_oc, [])
         
@@ -102,7 +97,7 @@ def registrar_consumo_oc(nro_oc, nombre_factura):
     return False
 
 def buscar_pdf_oc(nro_oc):
-    carpeta_oc = r"\\10.10.10.210\Compras\OC TELCOM"
+    carpeta_oc = CARPETA_OC
     if not os.path.exists(carpeta_oc):
         return None
         

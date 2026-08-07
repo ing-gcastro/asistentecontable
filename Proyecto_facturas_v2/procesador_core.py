@@ -5,7 +5,7 @@ import shutil
 from datetime import datetime
 import fitz  # PyMuPDF
 import pandas as pd
-from config import CARPETA_A, CARPETA_B, CARPETA_C, ARCHIVO_PROVEEDORES, MESES_ESPANOL
+from config import CARPETA_A, CARPETA_B, CARPETA_C, ARCHIVO_PROVEEDORES, MESES_ESPANOL, REPORTE_MAESTRO_HTML
 from pdf_rules import REGLAS_EXTRACCION
 from proveedores import cargar_excel_proveedores, buscar_proveedor
 from downloader import descargar_facturas_outlook
@@ -13,20 +13,48 @@ from reporter import generar_reporte_html, obtener_facturas_procesadas
 from proveedor_rules import es_factura_por_remitente, analizar_pdf_ecosan
 import oc_manager
 
+# ─── OCR FALLBACK ────────────────────────────────────────────────────────────
+def extraer_texto_con_ocr(ruta_pdf: str) -> str:
+    """Fallback OCR para PDFs escaneados o imagen."""
+    try:
+        from pdf2image import convert_from_path
+        import pytesseract
+        print("   📷 Activando OCR (pytesseract + pdf2image)...")
+        paginas = convert_from_path(ruta_pdf, dpi=300)
+        texto = "\n".join([pytesseract.image_to_string(p, lang="spa") for p in paginas])
+        return texto.strip()
+    except ImportError:
+        print("   ⚠️ OCR no disponible. pip install pytesseract pdf2image")
+        return ""
+    except Exception as e:
+        print(f"   ⚠️ Error OCR: {e}")
+        return ""
+# ─────────────────────────────────────────────────────────────────────────────
+
 def es_factura_valida(texto_lower, remitente=""):
+    """Valida si el texto corresponde a una factura/NC/ND válida de AFIP."""
+    # 1. Remitente de confianza
     if es_factura_por_remitente(remitente):
         return True
-        
-    texto_seguro = texto_lower.replace("presupuesto económico", "").replace("presupuesto economico", "")
-    
+    # 2. Limpiar frases válidas con "presupuesto"
+    texto_seguro = (texto_lower
+                    .replace("presupuesto económico", "")
+                    .replace("presupuesto economico", ""))
+    # 3. Rechazar palabras prohibidas
     for prohibida in REGLAS_EXTRACCION["palabras_prohibidas"]:
-        if prohibida.lower() in texto_seguro: 
+        if prohibida.lower() in texto_seguro:
             return False
-            
-    texto_sin_espacios_raros = re.sub(r'[\s\n\r\t:\-\._\|]+', '', texto_lower)
-    if "cae" in texto_sin_espacios_raros:
+    # 4. CAE numérico AFIP (14 dígitos comenzando con 8)
+    if re.search(r'\b8\d{13}\b', texto_lower):
         return True
-    if re.search(r'\b8\d{13,14}\b', texto_lower):
+    # 5. rx_cae del diccionario (tolerante a puntos, espacios, saltos)
+    if re.search(REGLAS_EXTRACCION["rx_cae"], texto_lower, re.IGNORECASE | re.MULTILINE):
+        return True
+    # 6. Texto colapsado (fallback)
+    if "cae" in re.sub(r'[\s\n\r\t:\-\._\|]+', '', texto_lower):
+        return True
+    # 7. Factura con número de comprobante formato AFIP (emergencia)
+    if re.search(r'\bfactura\b', texto_lower) and re.search(r'\b\d{4,5}[-\s]\d{7,8}\b', texto_lower):
         return True
     return False
 
@@ -37,7 +65,12 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
         texto_lower = texto_original.lower()
         doc.close()
         if not texto_lower.strip():
-            return False, "PDF vacío o imagen"
+            print(f"   ℹ️ Sin texto digital. Intentando OCR automatico...")
+            texto_original = extraer_texto_con_ocr(ruta_pdf)
+            if not texto_original.strip():
+                return False, "PDF vacio o imagen (OCR tambien fallo)"
+            texto_lower = texto_original.lower()
+            print(f"   ✅ OCR exitoso: {len(texto_original)} caracteres")
             
         if not es_factura_valida(texto_lower, remitente):
             return False, "Documento descartado (No tiene CAE o contiene palabras prohibidas)"
@@ -158,7 +191,7 @@ def obtener_ultima_fecha_procesada(ruta_html):
     return None
 
 def iniciar_proceso_interactivo(ejecutar_descarga=False, usar_filtro_fecha=True, fecha_inicio="01/07/2026", fecha_fin="", filtro_correo=""):
-    ruta_html_reporte = r"\\10.10.10.210\AyF_Trabajoadistancia\Compras\Reporte_Maestro.html"
+    ruta_html_reporte = REPORTE_MAESTRO_HTML
     
     ultima_fecha_historica = obtener_ultima_fecha_procesada(ruta_html_reporte)
     fecha_a_utilizar = ultima_fecha_historica if ultima_fecha_historica else fecha_inicio

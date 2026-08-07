@@ -26,29 +26,48 @@ def cargar_excel_proveedores(ruta_excel):
             }
     return base
 
-def cargar_sectores():
-    """Carga el archivo Sectores.xlsx y devuelve un diccionario {cuit: sector}."""
+# Cache en memoria: se carga una sola vez por sesión de Python
+_cache_sectores = None
+
+
+def cargar_sectores(forzar_reload=False):
+    """
+    Carga el archivo Sectores.xlsx y devuelve un diccionario {cuit: sector}.
+    Usa caché en memoria: el archivo solo se lee en la primera llamada
+    de cada ejecución del proceso.
+    """
+    global _cache_sectores
+    if _cache_sectores is not None and not forzar_reload:
+        return _cache_sectores
+
     if not os.path.exists(ARCHIVO_SECTORES):
-        return {}
-        
-    df = pd.read_excel(ARCHIVO_SECTORES)
-    df.columns = df.columns.str.strip()
-    
-    mapa_sectores = {}
-    for _, fila in df.iterrows():
-        try:
-            # Buscamos la columna CUIT / Numero_Documento y la columna Sector
-            cuit_val = str(fila.get('Numero_Documento', '')).strip()
-            cuit = "".join(filter(str.isdigit, cuit_val))
-            
-            sector_val = str(fila.get('Sector', '')).strip()
-            sector = sector_val.upper() if sector_val and sector_val != 'nan' else ""
-            
-            if cuit:
-                mapa_sectores[cuit] = sector
-        except Exception:
-            continue
-    return mapa_sectores
+        _cache_sectores = {}
+        return _cache_sectores
+
+    try:
+        df = pd.read_excel(ARCHIVO_SECTORES)
+        df.columns = df.columns.str.strip()
+
+        mapa = {}
+        for _, fila in df.iterrows():
+            try:
+                cuit_val = str(fila.get('Numero_Documento', '')).strip()
+                cuit = "".join(filter(str.isdigit, cuit_val))
+                sector_val = str(fila.get('Sector', '')).strip()
+                sector = sector_val.upper() if sector_val and sector_val != 'nan' else ""
+                if cuit:
+                    mapa[cuit] = sector
+            except Exception:
+                continue
+
+        _cache_sectores = mapa
+        print(f"Sectores en cache: {len(mapa)} registros")
+        return _cache_sectores
+
+    except Exception as e:
+        print(f"Error cargando sectores: {e}")
+        _cache_sectores = {}
+        return _cache_sectores
 
 def buscar_proveedor(cuit_pdf, razon_social_pdf, base_proveedores):
     cuit_limpio = "".join(filter(str.isdigit, str(cuit_pdf)))

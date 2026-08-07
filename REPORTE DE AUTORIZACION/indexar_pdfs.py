@@ -6,7 +6,7 @@ from datetime import datetime
 # 1. Define la ruta de tu carpeta principal y el archivo HTML de salida
 CARPETA_PRINCIPAL = r"\\10.10.10.210\AyF_Trabajoadistancia\AUTORIZACION DE FACTURAS"
 HTML_SALIDA = r"\\10.10.10.210\AyF_Trabajoadistancia\AUTORIZACION DE FACTURAS\Reporte.html"
-
+HTML_SALIDA = r"\\10.10.10.210\AyF_Trabajoadistancia\AUTORIZACION DE FACTURAS\Reportesector.html"
 TIPOS_VALIDOS = ["FC", "NC", "ND"]
 
 def parsear_nombre_archivo(nombre_archivo):

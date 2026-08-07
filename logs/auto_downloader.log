@@ -1,0 +1,7 @@
+2026-08-07 15:38:15 [INFO] ============================================================
+2026-08-07 15:38:15 [INFO] Iniciando descarga automatica de facturas
+2026-08-07 15:38:15 [INFO] Fecha extraida del tracking: 07/08/2026 (294 emails registrados)
+2026-08-07 15:38:15 [INFO] Buscando correos desde: 07/08/2026
+2026-08-07 15:38:15 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
+2026-08-07 15:38:20 [INFO] Descarga finalizada. PDFs obtenidos: 0
+2026-08-07 15:38:20 [INFO] ============================================================

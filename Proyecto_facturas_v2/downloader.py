@@ -3,7 +3,8 @@ import os
 import win32com.client
 from datetime import datetime
 import fitz  # PyMuPDF
-from config import CARPETA_A
+from config import CARPETA_A, ESTADO_EMAILS
+import json
 
 def obtener_ruta_unica(ruta):
     if not os.path.exists(ruta): return ruta
@@ -41,9 +42,7 @@ def excel_a_pdf(excel_path, pdf_path):
             pass
         return False
 
-import json
 
-ESTADO_EMAILS = r"c:\Users\gcastro\ROBOTS\asistentecontable\Proyecto_facturas_v2\emails_procesados.json"
 
 def cargar_procesados():
     if os.path.exists(ESTADO_EMAILS):

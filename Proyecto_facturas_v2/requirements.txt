@@ -1,0 +1,18 @@
+# requirements.txt — Dependencias del proyecto asistentecontable
+# Instalar con: pip install -r requirements.txt
+
+# PDF processing
+pymupdf>=1.24.0          # fitz — extracción de texto de PDFs
+
+# OCR (instalar Tesseract por separado en el sistema)
+pytesseract>=0.3.13       # Wrapper Python para Tesseract
+pdf2image>=1.17.0         # Conversión PDF a imagen para OCR
+Pillow>=10.0.0            # Imágenes PIL requeridas por pdf2image
+
+# Data processing
+pandas>=2.2.0             # Lectura de Excel de proveedores/OCs
+openpyxl>=3.1.0           # Motor para .xlsx
+xlrd>=2.0.1               # Motor para .xls (archivos legacy)
+
+# Windows Outlook integration
+pywin32>=306              # win32com.client para Outlook MAPI

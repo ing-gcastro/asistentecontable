@@ -311,6 +311,27 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
     if "Fecha" in df_final.columns:
         df_final = df_final.sort_values(by="Fecha", ascending=False)
 
+    # 7. Escribir Reporte Maestro
+    _escribir_html(df_final, ruta_html, "Reporte Histórico de Facturas Aprobadas")
+    
+    # 8. Escribir Reportes por Sector
+    base_sectores = r"\\10.10.10.210\AyF_Trabajoadistancia\AUTORIZACION DE FACTURAS"
+    if os.path.exists(base_sectores):
+        sectores_unicos = df_final['Sector'].dropna().unique()
+        for sec in sectores_unicos:
+            if not sec or sec == "GENERAL": continue
+            # Filtrar DataFrame
+            df_sec = df_final[df_final['Sector'] == sec]
+            if df_sec.empty: continue
+            
+            # Crear directorio si no existe
+            dir_sector = os.path.join(base_sectores, sec)
+            os.makedirs(dir_sector, exist_ok=True)
+            
+            ruta_sec = os.path.join(dir_sector, "Reporte.html")
+            _escribir_html(df_sec, ruta_sec, f"Reporte de Facturas - {sec}")
+
+def _escribir_html(df_final, ruta_html, titulo):
     timestamp_actual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     html_content = f"""<!DOCTYPE html>
 <html lang="es">
@@ -350,8 +371,8 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
 </head>
 <body>
     <div class="container-fluid">
-        <h2 class="text-primary fw-bold">📋 Reporte Histórico de Facturas Aprobadas</h2>
-        <p class="text-muted">Última actualización: <strong>{timestamp_actual}</strong> | Total de registros acumulados: <strong>{len(df_final)}</strong></p>
+        <h2 class="text-primary fw-bold">📋 {titulo}</h2>
+        <p class="text-muted">Última actualización: <strong>{timestamp_actual}</strong> | Total de registros: <strong>{len(df_final)}</strong></p>
         <hr>
         <div class="table-responsive">
             <table class="table table-striped table-bordered table-hover align-middle" id="tabla_reporte">
@@ -430,7 +451,7 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
                 </tbody>
             </table>
         </div>
-        <div class="footer">Sistema de Gestión Documental - Histórico Acumulativo</div>
+        <div class="footer">Sistema de Gestión Documental - {titulo}</div>
     </div>
 
     <!-- Scripts -->
@@ -462,7 +483,7 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
     with open(ruta_html, "w", encoding="utf-8") as f:
         f.write(html_content)
         
-    print(f"Reporte acumulativo actualizado con exito en: {ruta_html} (Total registros: {len(df_final)})")
+    print(f"Reporte actualizado con exito en: {ruta_html} (Total registros: {len(df_final)})")
 
 if __name__ == "__main__":
     generar_reporte_html()
