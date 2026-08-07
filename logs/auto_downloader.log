@@ -5,3 +5,17 @@
 2026-08-07 15:38:15 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
 2026-08-07 15:38:20 [INFO] Descarga finalizada. PDFs obtenidos: 0
 2026-08-07 15:38:20 [INFO] ============================================================
+2026-08-07 16:20:23 [INFO] ============================================================
+2026-08-07 16:20:23 [INFO] Iniciando descarga automatica de facturas
+2026-08-07 16:20:23 [INFO] Fecha extraida del tracking: 07/08/2026 (294 emails registrados)
+2026-08-07 16:20:23 [INFO] Buscando correos desde: 07/08/2026
+2026-08-07 16:20:23 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
+2026-08-07 16:20:25 [INFO] Descarga finalizada. PDFs obtenidos: 6
+2026-08-07 16:20:25 [INFO] ============================================================
+2026-08-07 16:42:01 [INFO] ============================================================
+2026-08-07 16:42:01 [INFO] Iniciando descarga automatica de facturas
+2026-08-07 16:42:01 [INFO] Fecha extraida del tracking: 07/08/2026 (297 emails registrados)
+2026-08-07 16:42:01 [INFO] Buscando correos desde: 07/08/2026
+2026-08-07 16:42:01 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
+2026-08-07 16:42:01 [INFO] Descarga finalizada. PDFs obtenidos: 1
+2026-08-07 16:42:01 [INFO] ============================================================
