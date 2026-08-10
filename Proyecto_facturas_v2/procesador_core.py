@@ -15,19 +15,38 @@ import oc_manager
 
 # ─── OCR FALLBACK ────────────────────────────────────────────────────────────
 def extraer_texto_con_ocr(ruta_pdf: str) -> str:
-    """Fallback OCR para PDFs escaneados o imagen."""
+    """Fallback OCR para PDFs escaneados o imagen usando RapidOCR + PyMuPDF."""
+    print("   📷 Activando OCR (RapidOCR + PyMuPDF)...")
+    texto_extraido = []
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+        engine = RapidOCR()
+        doc = fitz.open(ruta_pdf)
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            pix = page.get_pixmap(dpi=200)
+            img_bytes = pix.tobytes("png")
+            result, _ = engine(img_bytes)
+            if result:
+                texto_pagina = "\n".join([line[1] for line in result])
+                texto_extraido.append(texto_pagina)
+        doc.close()
+        res = "\n".join(texto_extraido).strip()
+        if res:
+            print(f"   ✅ RapidOCR exitoso: {len(res)} caracteres extraídos")
+            return res
+    except Exception as e:
+        print(f"   ⚠️ RapidOCR falló: {e}")
+
+    # Fallback secundario pytesseract
     try:
         from pdf2image import convert_from_path
         import pytesseract
-        print("   📷 Activando OCR (pytesseract + pdf2image)...")
-        paginas = convert_from_path(ruta_pdf, dpi=300)
+        paginas = convert_from_path(ruta_pdf, dpi=200)
         texto = "\n".join([pytesseract.image_to_string(p, lang="spa") for p in paginas])
         return texto.strip()
-    except ImportError:
-        print("   ⚠️ OCR no disponible. pip install pytesseract pdf2image")
-        return ""
     except Exception as e:
-        print(f"   ⚠️ Error OCR: {e}")
+        print(f"   ⚠️ Error OCR secundario: {e}")
         return ""
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -63,14 +82,24 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
         doc = fitz.open(ruta_pdf)
         texto_original = "\n".join([pagina.get_text("text", sort=True) for pagina in doc])
         texto_lower = texto_original.lower()
+
+        # --- REGLA CATÁLOGOS: Si tiene más de 3 páginas, se descarta por catálogo/manual ---
+        if len(doc) > 3:
+            doc.close()
+            return False, "Documento descartado (Tiene más de 3 páginas - Catálogo/Manual)"
+
         doc.close()
-        if not texto_lower.strip():
-            print(f"   ℹ️ Sin texto digital. Intentando OCR automatico...")
-            texto_original = extraer_texto_con_ocr(ruta_pdf)
-            if not texto_original.strip():
-                return False, "PDF vacio o imagen (OCR tambien fallo)"
-            texto_lower = texto_original.lower()
-            print(f"   ✅ OCR exitoso: {len(texto_original)} caracteres")
+
+        ocr_ejecutado = False
+        if len(texto_lower.strip()) < 50 or not es_factura_valida(texto_lower, remitente):
+            print(f"   ℹ️ Texto escaso o sin validación previa. Intentando OCR automático...")
+            texto_ocr = extraer_texto_con_ocr(ruta_pdf)
+            if texto_ocr.strip():
+                texto_original = texto_original + "\n" + texto_ocr
+                texto_lower = texto_original.lower()
+                ocr_ejecutado = True
+            elif not texto_lower.strip():
+                return False, "PDF vacío o imagen (OCR también falló)"
             
         if not es_factura_valida(texto_lower, remitente):
             return False, "Documento descartado (No tiene CAE o contiene palabras prohibidas)"
@@ -117,14 +146,34 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
             if REGLAS_EXTRACCION["empresa_propia"] in razon_social:
                 razon_social = "" 
                 
+        # ─── EXTRACCIÓN ROBUSTA DE CUIT DEL PROVEEDOR ─────────────────────────
         cuit_proveedor = ""
-        todos_cuits = re.findall(REGLAS_EXTRACCION["rx_cuit"], texto_original, re.IGNORECASE)
         cuit_propio_limpio = "30696428898"
-        for c in todos_cuits:
+        
+        # 1. Buscar todos los CUITs de 11 dígitos en el texto
+        todos_cuits_raw = re.findall(r"\b((?:20|23|24|27|30|33|34)[-\s]?\d{2}[-\s]?\d{6}[-\s]?\d{1})\b", texto_original)
+        posibles_cuits = []
+        for c in todos_cuits_raw:
             c_limpio = "".join(filter(str.isdigit, c))
-            if c_limpio and c_limpio != cuit_propio_limpio:
-                cuit_proveedor = c_limpio
-                break 
+            if c_limpio and c_limpio != cuit_propio_limpio and len(c_limpio) == 11:
+                if c_limpio not in posibles_cuits:
+                    posibles_cuits.append(c_limpio)
+
+        if posibles_cuits:
+            cuit_proveedor = posibles_cuits[0]
+
+        # 2. Si no halló nada y no ejecutó OCR, forzar OCR y buscar de nuevo
+        if not cuit_proveedor and not ocr_ejecutado:
+            print(f"   ℹ️ CUIT del proveedor no hallado en texto digital. Forzando OCR completo...")
+            texto_ocr = extraer_texto_con_ocr(ruta_pdf)
+            if texto_ocr.strip():
+                texto_original += "\n" + texto_ocr
+                todos_cuits_raw = re.findall(r"\b((?:20|23|24|27|30|33|34)[-\s]?\d{2}[-\s]?\d{6}[-\s]?\d{1})\b", texto_original)
+                for c in todos_cuits_raw:
+                    c_limpio = "".join(filter(str.isdigit, c))
+                    if c_limpio and c_limpio != cuit_propio_limpio and len(c_limpio) == 11:
+                        cuit_proveedor = c_limpio
+                        break 
 
         # --- EXTRACCIÓN DE FECHA DE EMISIÓN Y DETECCIÓN DE EUROSAT ---
         fecha_emision_str = ""
@@ -138,13 +187,26 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
         if nombre_eurosat in texto_original.upper() or cuit_eurosat_limpio in texto_original:
             es_eurosat = True
                 
+        # --- EXTRACCIÓN DE OC Y SUBTOTAL ---
+        oc_encontrada = ""
+        m_oc = re.search(REGLAS_EXTRACCION["rx_oc"], texto_original, re.IGNORECASE)
+        if m_oc:
+            oc_encontrada = m_oc.group(1).strip()
+            
+        subtotal_encontrado = ""
+        m_sub = re.search(REGLAS_EXTRACCION["rx_subtotal"], texto_original, re.IGNORECASE)
+        if m_sub:
+            subtotal_encontrado = m_sub.group(1).strip()
+                
         return True, {
             "tipo": tipo, 
             "numero": nro, 
             "razon_social": razon_social, 
             "cuit": cuit_proveedor,
             "fecha_emision": fecha_emision_str,
-            "es_eurosat": es_eurosat
+            "es_eurosat": es_eurosat,
+            "oc_extraida": oc_encontrada,
+            "subtotal": subtotal_encontrado
         }
     except Exception as e:
         return False, f"Error de lectura: {str(e)}"
@@ -352,51 +414,81 @@ def iniciar_proceso_interactivo(ejecutar_descarga=False, usar_filtro_fecha=True,
         ocs_disponibles = oc_manager.leer_oc_disponibles(cuit_busq, nombre_final)
         print(f"[DEBUG] OCs devueltas por el manager: {len(ocs_disponibles)}")
         
-        if ocs_disponibles:
+        oc_elegida = ""
+        oc_extraida = datos.get("oc_extraida", "")
+        
+        if oc_extraida:
+            print(f"📌 Se detectó automáticamente la leyenda OC {oc_extraida} en el PDF.")
+            # Verificar si la OC extraída está en las disponibles
+            if any(o['nro_oc'].lower() == oc_extraida.lower() for o in ocs_disponibles):
+                print(f"✅ La OC {oc_extraida} está disponible en la base de datos.")
+                oc_elegida = oc_extraida
+            else:
+                # Opcional: Permitir fusionar igual aunque no esté en disponibles?
+                # Vamos a forzar la búsqueda de todas formas para no trabar el proceso
+                oc_elegida = oc_extraida
+        
+        if ocs_disponibles and not oc_elegida:
             print(f"\n🛒 OCs disponibles para {nombre_final}:")
             for i, oc in enumerate(ocs_disponibles, 1):
                 print(f"  {i}) OC {oc['nro_oc']} | {oc['fecha']} | {oc['articulo']} | Tipo: {oc['tipo']}")
                 
             oc_elegida = input("Escribe el Nro de OC a vincular (o presiona Enter para omitir): ").strip()
             
-            if oc_elegida:
-                oc_encontrada = next((o for o in ocs_disponibles if o['nro_oc'].lower() == oc_elegida.lower()), None)
+        if oc_elegida:
+            # Buscar en la lista (si está) o usar la extraída directamente
+            oc_encontrada = next((o for o in ocs_disponibles if o['nro_oc'].lower() == oc_elegida.lower()), None)
+            nro_oc_final = oc_encontrada['nro_oc'] if oc_encontrada else oc_elegida
+            
+            ruta_pdf_oc = oc_manager.buscar_pdf_oc(nro_oc_final)
+            if ruta_pdf_oc:
+                print(f"✅ Se adjuntará el PDF de la OC: {os.path.basename(ruta_pdf_oc)}")
+                archivos_a_fusionar.append(ruta_pdf_oc)
+                
+                # Agregar sufijo al nombre
+                base_n, ext_n = os.path.splitext(nombre_sugerido)
+                nombre_sugerido = f"{base_n} -OC {nro_oc_final}{ext_n}"
+                
+                # Registrar consumo
                 if oc_encontrada:
-                    ruta_pdf_oc = oc_manager.buscar_pdf_oc(oc_encontrada['nro_oc'])
-                    if ruta_pdf_oc:
-                        print(f"✅ Se adjuntará el PDF de la OC: {os.path.basename(ruta_pdf_oc)}")
-                        archivos_a_fusionar.append(ruta_pdf_oc)
-                        
-                        # Agregar sufijo al nombre
-                        base_n, ext_n = os.path.splitext(nombre_sugerido)
-                        nombre_sugerido = f"{base_n} -OC {oc_encontrada['nro_oc']}{ext_n}"
-                        
-                        # Registrar consumo
-                        oc_manager.registrar_consumo_oc(oc_encontrada['nro_oc'], nombre_sugerido)
-                    else:
-                        print(f"⚠️ No se encontró el archivo PDF para la OC {oc_encontrada['nro_oc']} en la red. Se omitirá la fusión de la OC.")
-                else:
-                    print("⚠️ Nro de OC no coincide con la lista. Se omitirá.")
+                    oc_manager.registrar_consumo_oc(nro_oc_final, nombre_sugerido)
+            else:
+                print(f"⚠️ No se encontró el archivo PDF para la OC {nro_oc_final} en la red. Se omitirá la fusión de la OC.")
                     
         nombre_limpio = re.sub(r'[\\/*?:"<>|]', "", nombre_sugerido)
         ruta_destino_c = obtener_ruta_unica(os.path.join(CARPETA_C, nombre_limpio))
         
+        sector_final = sector if sector else "GENERAL"
+        carpeta_autorizacion = r"\\10.10.10.210\AyF_Trabajoadistancia\AUTORIZACION DE FACTURAS"
+        carpeta_sector = os.path.join(carpeta_autorizacion, sector_final)
+        os.makedirs(carpeta_sector, exist_ok=True)
+        ruta_destino_sector = obtener_ruta_unica(os.path.join(carpeta_sector, nombre_limpio))
+        
         if len(archivos_a_fusionar) > 1:
             fusionar_pdfs_adjuntos(archivos_a_fusionar, ruta_destino_c)
+            # Copiar el fusionado a Autorizacion
+            shutil.copy2(ruta_destino_c, ruta_destino_sector)
             for r_fusa in archivos_a_fusionar:
-                if os.path.exists(r_fusa): os.remove(r_fusa)
-            print(f"✅ ¡Fusionados y guardados como un único PDF en Carpeta C!")
+                if os.path.exists(r_fusa) and r_fusa != ruta_completa: 
+                    # No borrar la OC original, solo borrar adjuntos del correo
+                    if CARPETA_A in r_fusa:
+                        os.remove(r_fusa)
+            if os.path.exists(ruta_completa):
+                os.remove(ruta_completa)
+            print(f"✅ ¡Fusionados y guardados en 'fc a subir' y '{sector_final}'!")
         else:
-            shutil.move(ruta_completa, ruta_destino_c)
-            print(f"✅ ¡Aprobado y movido a Carpeta C!")
+            shutil.copy2(ruta_completa, ruta_destino_c)
+            shutil.move(ruta_completa, ruta_destino_sector)
+            print(f"✅ ¡Aprobado y movido a 'fc a subir' y '{sector_final}'!")
         
         datos_para_html.append({
             "Fecha": datetime.now().strftime("%d/%m/%Y"),
             "Tipo": datos['tipo'],
             "Nro Comprobante": datos['numero'],
             "Razon Social": nombre_final,
-            "Sector": sector if sector else "GENERAL",
-            "OC": "N/A"
+            "Sector": sector_final,
+            "OC": oc_elegida if oc_elegida else "N/A",
+            "Subtotal": datos.get("subtotal", "")
         })
         
         procesados_contador += 1

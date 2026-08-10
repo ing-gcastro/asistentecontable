@@ -18,8 +18,10 @@ REGLAS_EXTRACCION = {
         "DOMICILIO FISCAL", "RESPONSABLE INSCRIPTO", "IVA", 
         "PUNTO DE VENTA", "FACTURA", "CUIT"
     ],
-    "rx_cuit": r"C\.?U\.?I\.?T\.?[\s:\.\|]*\n?\s*\|?\s*((?:20|23|24|27|30|33|34)[-\s]?\d{2}[-\s]?\d{6}[-\s]?\d{1})",
+    "rx_cuit": r"(?:C\.?U\.?I\.?T\.?|C\.?U\.?I\.?L\.?|CUIT/CUIL/DNI)?[\s:\.\|N°º]*\n?\s*\|?\s*((?:20|23|24|27|30|33|34)[-\s]?\d{2}[-\s]?\d{6}[-\s]?\d{1})",
     "rx_fecha_emision": r"Fecha\s*[:\.]?\s*(\d{2}[-/]\d{2}[-/]\d{4})",
     "cuit_eurosat": "33676549639",
-    "nombre_eurosat": "EUROSAT"
+    "nombre_eurosat": "EUROSAT",
+    "rx_subtotal": r"(?:Subtotal|Importe Neto Gravado|Neto Gravado)[\s:\$]*([\d\.,]+)",
+    "rx_oc": r"OC[\s:-]*(\d{2,6})"
 }

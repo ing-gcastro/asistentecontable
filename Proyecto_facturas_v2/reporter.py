@@ -123,6 +123,7 @@ def parsear_nombre_aprobado(nombre_archivo):
             if tokens:
                 if tokens[0].upper() != 'OC':
                     numero = tokens[0]
+                    if numero.endswith('.0'): numero = numero[:-2]
                     resto_tokens = tokens[1:]
                 else:
                     resto_tokens = tokens
@@ -314,25 +315,86 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
     # 7. Escribir Reporte Maestro
     _escribir_html(df_final, ruta_html, "Reporte Histórico de Facturas Aprobadas")
     
-    # 8. Escribir Reportes por Sector
+    # 8. Escribir Reportes por Sector y Reportesector.html (100% Pura Lectura Física)
     base_sectores = r"\\10.10.10.210\AyF_Trabajoadistancia\AUTORIZACION DE FACTURAS"
+    ruta_consolidado_sector = os.path.join(base_sectores, "Reportesector.html")
+    
     if os.path.exists(base_sectores):
-        sectores_unicos = df_final['Sector'].dropna().unique()
-        for sec in sectores_unicos:
-            if not sec or sec == "GENERAL": continue
-            # Filtrar DataFrame
-            df_sec = df_final[df_final['Sector'] == sec]
-            if df_sec.empty: continue
-            
-            # Crear directorio si no existe
+        sectores_encontrados = [d for d in os.listdir(base_sectores) if os.path.isdir(os.path.join(base_sectores, d))]
+        todos_registros_sector = []
+        
+        for sec in sectores_encontrados:
+            if sec.upper() in ["ARCHIVOS EN REVISION", "REPORTES"]:
+                continue
+                
             dir_sector = os.path.join(base_sectores, sec)
-            os.makedirs(dir_sector, exist_ok=True)
+            registros_fisicos = []
             
-            ruta_sec = os.path.join(dir_sector, "Reporte.html")
-            _escribir_html(df_sec, ruta_sec, f"Reporte de Facturas - {sec}")
+            # Escaneo físico recursivo
+            for root, dirs, files in os.walk(dir_sector):
+                for f in files:
+                    if f.lower().endswith(".pdf"):
+                        ruta_pdf = os.path.join(root, f)
+                        info = parsear_nombre_aprobado(f)
+                        rel_path = os.path.relpath(root, dir_sector)
+                        
+                        # Estado estricto según ubicación física
+                        estado_sub = "PENDIENTE"
+                        if "AUTORIZAD" in rel_path.upper():
+                            estado_sub = "AUTORIZADA"
+                        elif "REVIS" in rel_path.upper():
+                            estado_sub = "A REVISIÓN"
+                            
+                        try:
+                            fecha_mod = datetime.fromtimestamp(os.path.getmtime(ruta_pdf)).strftime('%d/%m/%Y %H:%M:%S')
+                        except Exception:
+                            fecha_mod = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
+                            
+                        nro_clean = str(info["Nro Comprobante"]).strip()
+                        if nro_clean.endswith('.0'): nro_clean = nro_clean[:-2]
+                        
+                        item = {
+                            "Fecha": fecha_mod,
+                            "Empresa": info["Empresa"],
+                            "Razón Social": info["Razón Social"],
+                            "Tipo": info["Tipo"],
+                            "Nro Comprobante": nro_clean,
+                            "Subtotal": "",
+                            "OC": info["OC"],
+                            "Información Adicional": info["Información Adicional"],
+                            "Sector": sec,
+                            "Estado": estado_sub
+                        }
+                        registros_fisicos.append(item)
+                        todos_registros_sector.append(item)
+            
+            df_sec = pd.DataFrame(registros_fisicos)
+            if not df_sec.empty:
+                df_sec.drop_duplicates(subset=["Razón Social", "Nro Comprobante"], keep="last", inplace=True)
+                df_sec.sort_values(by=["Fecha"], ascending=False, inplace=True)
+                ruta_sec = os.path.join(dir_sector, "Reporte.html")
+                _escribir_html(df_sec, ruta_sec, f"Reporte de Facturas - {sec}", es_sector=True)
+                
+        # Escribir el Consolidado Global de Sectores (Reportesector.html)
+        df_consolidado = pd.DataFrame(todos_registros_sector)
+        if not df_consolidado.empty:
+            df_consolidado.drop_duplicates(subset=["Razón Social", "Nro Comprobante"], keep="last", inplace=True)
+            df_consolidado.sort_values(by=["Fecha"], ascending=False, inplace=True)
+            _escribir_html(df_consolidado, ruta_consolidado_sector, "Reporte Consolidado por Sector", es_sector=True)
 
-def _escribir_html(df_final, ruta_html, titulo):
+def _escribir_html(df_final, ruta_html, titulo, es_sector=False):
     timestamp_actual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    
+    headers_extra = "" if es_sector else """
+                        <th>Etapa Contable</th>
+                        <th>Archivo</th>
+                        <th>Ruta Completa</th>"""
+                        
+    filters_extra = "" if es_sector else """
+                        <th><input type="text" placeholder="Filtrar Etapa" /></th>
+                        <th><input type="text" placeholder="Filtrar Archivo" /></th>
+                        <th><input type="text" placeholder="Filtrar Ruta Completa" /></th>"""
+
     html_content = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -383,13 +445,11 @@ def _escribir_html(df_final, ruta_html, titulo):
                         <th>Razón Social</th>
                         <th>Tipo</th>
                         <th>Nro Comprobante</th>
+                        <th>Subtotal</th>
                         <th>OC</th>
                         <th>Información Adicional</th>
                         <th>Sector</th>
-                        <th>Estado</th>
-                        <th>Etapa Contable</th>
-                        <th>Archivo</th>
-                        <th>Ruta Completa</th>
+                        <th>Estado</th>{headers_extra}
                     </tr>
                     <tr>
                         <th><input type="text" placeholder="Filtrar Fecha" /></th>
@@ -397,13 +457,11 @@ def _escribir_html(df_final, ruta_html, titulo):
                         <th><input type="text" placeholder="Filtrar Razón Social" /></th>
                         <th><input type="text" placeholder="Filtrar Tipo" /></th>
                         <th><input type="text" placeholder="Filtrar Nro Comprobante" /></th>
+                        <th><input type="text" placeholder="Filtrar Subtotal" /></th>
                         <th><input type="text" placeholder="Filtrar OC" /></th>
                         <th><input type="text" placeholder="Filtrar Info Adicional" /></th>
                         <th><input type="text" placeholder="Filtrar Sector" /></th>
-                        <th><input type="text" placeholder="Filtrar Estado" /></th>
-                        <th><input type="text" placeholder="Filtrar Etapa" /></th>
-                        <th><input type="text" placeholder="Filtrar Archivo" /></th>
-                        <th><input type="text" placeholder="Filtrar Ruta Completa" /></th>
+                        <th><input type="text" placeholder="Filtrar Estado" /></th>{filters_extra}
                     </tr>
                 </thead>
                 <tbody>
@@ -430,20 +488,26 @@ def _escribir_html(df_final, ruta_html, titulo):
         else:
             badge_etapa = '<span class="badge bg-light text-dark">OTRA</span>'
 
+        td_extra = "" if es_sector else f"""
+                        <td>{badge_etapa}</td>
+                        <td>{row.get('Archivo', '')}</td>
+                        <td style="font-family: monospace; font-size: 0.75rem; word-break: break-all;">{row.get('Ruta Completa', '')}</td>"""
+
+        nro_disp = str(row.get('Nro Comprobante', '')).strip()
+        if nro_disp.endswith('.0'): nro_disp = nro_disp[:-2]
+
         html_content += f"""
                     <tr>
                         <td>{row.get('Fecha', '')}</td>
                         <td><span class="badge bg-secondary">{row.get('Empresa', 'TELCOM VENTURES')}</span></td>
                         <td class="fw-bold">{row.get('Razón Social', '')}</td>
                         <td>{row.get('Tipo', '')}</td>
-                        <td>{row.get('Nro Comprobante', '')}</td>
+                        <td>{nro_disp}</td>
+                        <td class="text-end fw-bold text-success">{row.get('Subtotal', '')}</td>
                         <td>{row.get('OC', 'N/A')}</td>
                         <td>{row.get('Información Adicional', '')}</td>
                         <td><span class="badge bg-info text-dark">{row.get('Sector', 'GENERAL')}</span></td>
-                        <td>{badge_estado}</td>
-                        <td>{badge_etapa}</td>
-                        <td>{row.get('Archivo', '')}</td>
-                        <td style="font-family: monospace; font-size: 0.75rem; word-break: break-all;">{row.get('Ruta Completa', '')}</td>
+                        <td>{badge_estado}</td>{td_extra}
                     </tr>
 """
 

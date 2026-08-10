@@ -19,3 +19,38 @@
 2026-08-07 16:42:01 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
 2026-08-07 16:42:01 [INFO] Descarga finalizada. PDFs obtenidos: 1
 2026-08-07 16:42:01 [INFO] ============================================================
+2026-08-10 10:20:25 [INFO] ============================================================
+2026-08-10 10:20:25 [INFO] Iniciando descarga automatica de facturas
+2026-08-10 10:20:25 [INFO] Fecha extraida del tracking: 07/08/2026 (299 emails registrados)
+2026-08-10 10:20:25 [INFO] Buscando correos desde: 07/08/2026
+2026-08-10 10:20:25 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
+2026-08-10 10:20:36 [INFO] Descarga finalizada. PDFs obtenidos: 10
+2026-08-10 10:20:36 [INFO] ============================================================
+2026-08-10 10:42:01 [INFO] ============================================================
+2026-08-10 10:42:01 [INFO] Iniciando descarga automatica de facturas
+2026-08-10 10:42:01 [INFO] Fecha extraida del tracking: 10/08/2026 (318 emails registrados)
+2026-08-10 10:42:01 [INFO] Buscando correos desde: 10/08/2026
+2026-08-10 10:42:01 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
+2026-08-10 10:42:01 [INFO] Descarga finalizada. PDFs obtenidos: 0
+2026-08-10 10:42:01 [INFO] ============================================================
+2026-08-10 11:20:22 [INFO] ============================================================
+2026-08-10 11:20:22 [INFO] Iniciando descarga automatica de facturas
+2026-08-10 11:20:22 [INFO] Fecha extraida del tracking: 10/08/2026 (319 emails registrados)
+2026-08-10 11:20:22 [INFO] Buscando correos desde: 10/08/2026
+2026-08-10 11:20:22 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
+2026-08-10 11:20:24 [INFO] Descarga finalizada. PDFs obtenidos: 1
+2026-08-10 11:20:24 [INFO] ============================================================
+2026-08-10 11:42:01 [INFO] ============================================================
+2026-08-10 11:42:01 [INFO] Iniciando descarga automatica de facturas
+2026-08-10 11:42:01 [INFO] Fecha extraida del tracking: 10/08/2026 (324 emails registrados)
+2026-08-10 11:42:01 [INFO] Buscando correos desde: 10/08/2026
+2026-08-10 11:42:01 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
+2026-08-10 11:42:01 [INFO] Descarga finalizada. PDFs obtenidos: 0
+2026-08-10 11:42:01 [INFO] ============================================================
+2026-08-10 12:20:24 [INFO] ============================================================
+2026-08-10 12:20:24 [INFO] Iniciando descarga automatica de facturas
+2026-08-10 12:20:24 [INFO] Fecha extraida del tracking: 10/08/2026 (324 emails registrados)
+2026-08-10 12:20:24 [INFO] Buscando correos desde: 10/08/2026
+2026-08-10 12:20:24 [INFO] Destino: \\10.10.10.210\Compras\entrada de facturas
+2026-08-10 12:20:24 [INFO] Descarga finalizada. PDFs obtenidos: 0
+2026-08-10 12:20:24 [INFO] ============================================================
