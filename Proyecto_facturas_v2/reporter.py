@@ -63,29 +63,36 @@ def guardar_cache(cache):
         print(f"⚠️ Error al guardar el caché local: {e}")
 
 def obtener_estados_autorizacion():
-    """Lee el reporte de autorización externo para obtener los estados de las facturas."""
-    if not os.path.exists(RUTA_REPORTE_AUTORIZACION):
-        return {}, {}
-    try:
-        df_aut = pd.read_html(RUTA_REPORTE_AUTORIZACION)[0]
-        estados_por_archivo = {}
-        estados_por_datos = {}
-        for _, row in df_aut.iterrows():
-            archivo = str(row.get('Nombre completo del archivo', '')).strip()
-            estado = str(row.get('Estado', 'PENDIENTE')).strip().upper()
-            if archivo:
-                estados_por_archivo[archivo] = estado
-            
-            rs = str(row.get('Razón Social', '')).strip().upper()
-            tipo = str(row.get('Tipo', '')).strip().upper()
-            nro = str(row.get('Número', '')).strip()
-            if rs and nro:
-                estados_por_datos[(rs, tipo, nro)] = estado
-                
+    """Escanea físicamente la estructura de AUTORIZACION DE FACTURAS para obtener el estado real de cada comprobante."""
+    base_autorizaciones = r"\\10.10.10.210\AyF_Trabajoadistancia\AUTORIZACION DE FACTURAS"
+    estados_por_archivo = {}
+    estados_por_datos = {}
+    
+    if not os.path.exists(base_autorizaciones):
         return estados_por_archivo, estados_por_datos
-    except Exception as e:
-        print(f"⚠️ Nota al leer el reporte de autorización: {e}")
-        return {}, {}
+        
+    for root, dirs, files in os.walk(base_autorizaciones):
+        for f in files:
+            if f.lower().endswith(".pdf"):
+                rel_path = os.path.relpath(root, base_autorizaciones)
+                
+                estado = "PENDIENTE"
+                if "AUTORIZAD" in rel_path.upper():
+                    estado = "AUTORIZADA"
+                elif "REVIS" in rel_path.upper():
+                    estado = "A REVISIÓN"
+                    
+                estados_por_archivo[f] = estado
+                
+                info = parsear_nombre_aprobado(f)
+                rs = str(info["Razón Social"]).strip().upper()
+                nro = str(info["Nro Comprobante"]).strip()
+                if nro.endswith('.0'): nro = nro[:-2]
+                
+                if rs and nro:
+                    estados_por_datos[(rs, nro)] = estado
+                    
+    return estados_por_archivo, estados_por_datos
 
 def parsear_nombre_aprobado(nombre_archivo):
     nombre_sin_ext = Path(nombre_archivo).stem.strip()
@@ -298,12 +305,12 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
             # Si no encontró gemelo en otras carpetas, asumimos que su ruta es la que teníamos
             df_tracked.at[idx, 'Ruta Completa'] = row.get('Ruta Completa', '')
 
-        # Actualizar Estado desde Autorización (N/A por defecto)
-        estado = "N/A"
+        # Actualizar Estado desde la estructura física de Autorización (PENDIENTE por defecto)
+        estado = "PENDIENTE"
         if nombre_arch in estados_por_archivo:
             estado = estados_por_archivo[nombre_arch]
-        elif (rs_key, tipo_key, nro_key) in estados_por_datos:
-            estado = estados_por_datos[(rs_key, tipo_key, nro_key)]
+        elif (rs_key, nro_key) in estados_por_datos:
+            estado = estados_por_datos[(rs_key, nro_key)]
         df_tracked.at[idx, 'Estado'] = estado
 
     df_final = df_tracked.sort_values(by=["Razón Social", "Nro Comprobante", "Nivel Etapa"], ascending=[True, True, True])
