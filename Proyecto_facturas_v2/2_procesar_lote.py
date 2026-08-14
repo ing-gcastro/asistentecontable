@@ -72,19 +72,22 @@ def procesar_excel_lote():
             print(f"⚠️ Archivo no encontrado en Carpeta A: {archivo_orig} (Omitiendo)")
             continue
             
-        if accion == "RECHAZAR":
+        # Normalizar acción (quitar acentos y espacios extra)
+        accion_norm = accion.replace("Ó", "O").replace("Í", "I").replace("Á", "A").replace("É", "E").replace("Ú", "U")
+        
+        if "RECHAZ" in accion_norm or "NO" in accion_norm or "DESCART" in accion_norm:
             destino_b = obtener_ruta_unica(os.path.join(CARPETA_B, archivo_orig))
             shutil.move(ruta_completa, destino_b)
             rechazadas += 1
             print(f"❌ RECHAZADA: {archivo_orig}")
             
-        elif accion == "REVISION":
+        elif "REVIS" in accion_norm:
             destino_rev = obtener_ruta_unica(os.path.join(CARPETA_REVISION, archivo_orig))
             shutil.move(ruta_completa, destino_rev)
             revision += 1
             print(f"⏸️  A REVISIÓN: {archivo_orig}")
             
-        elif accion == "APROBAR":
+        elif "APROB" in accion_norm or "OK" in accion_norm or "SI" in accion_norm:
             # Extraer campos corregidos manualmente del Excel
             nombre_propuesto = str(row.get("Nombre_Propuesto", "")).strip()
             sector_editado = str(row.get("Sector", "")).strip().upper()

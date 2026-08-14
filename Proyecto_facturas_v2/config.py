@@ -12,12 +12,15 @@ _BASE_DATA  = os.path.join(_BASE_LOCAL, "data")
 # ─── RUTAS DE RED (UNC) ──────────────────────────────────────────────────────
 _SERVIDOR   = r"\\10.10.10.210"
 
-# ─── CARPETAS OPERATIVAS (RED) ───────────────────────────────────────────────
-CARPETA_A           = rf"{_SERVIDOR}\Compras\entrada de facturas"
-CARPETA_B           = rf"{_SERVIDOR}\Compras\no es factura"
+# ─── CARPETAS OPERATIVAS (LOCALES / DESKTOP) ──────────────────────────────────
+_BASE_DESKTOP_PROCESO = rf"C:\Users\{_USUARIO}\Desktop\PROCESO DE FC"
+CARPETA_A           = rf"{_BASE_DESKTOP_PROCESO}\entrada de facturas"
+CARPETA_B           = rf"{_BASE_DESKTOP_PROCESO}\no es factura"
+CARPETA_REVISION    = rf"{_BASE_DESKTOP_PROCESO}\archivos en revision"
+
+# ─── CARPETAS OPERATIVAS (RED UNC) ───────────────────────────────────────────
 CARPETA_C           = rf"{_SERVIDOR}\AyF_Trabajoadistancia\Compras\fc a subir"
 CARPETA_OC          = rf"{_SERVIDOR}\Compras\OC TELCOM"
-CARPETA_REVISION    = rf"{_SERVIDOR}\Compras\archivos en revision"
 
 # ─── ARCHIVOS DE DATOS (EXCEL) ───────────────────────────────────────────────
 ARCHIVO_PROVEEDORES = os.path.join(_BASE_DATA, "proveedores (2).xls")
