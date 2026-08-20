@@ -135,6 +135,10 @@ def procesar_excel_lote():
                     else:
                         print(f"  ⚠️ Archivo extra no encontrado: {r_extra}")
             
+            empresa_val = "EUROSAT" if ("(EUROSAT)" in nombre_propuesto.upper() or str(row.get("Empresa", "")).strip().upper() == "EUROSAT") else "TELCOM VENTURES"
+            if empresa_val == "EUROSAT" and not nombre_propuesto.upper().startswith("(EUROSAT)"):
+                nombre_propuesto = f"(EUROSAT) {nombre_propuesto}"
+
             # ─── RUTEADOR DINÁMICO AL SECTOR EDITADO ──────────────────────────────────
             nombre_limpio = re.sub(r'[\\/*?:"<>|]', "", nombre_propuesto)
             ruta_destino_c = obtener_ruta_unica(os.path.join(CARPETA_C, nombre_limpio))
@@ -158,6 +162,7 @@ def procesar_excel_lote():
             # Registrar en HTML
             datos_para_html.append({
                 "Fecha": datetime.now().strftime("%d/%m/%Y"),
+                "Empresa": empresa_val,
                 "Tipo": str(row.get("Tipo", "")),
                 "Nro Comprobante": str(row.get("Nro_Comprobante", "")),
                 "Razon Social": str(row.get("Razón_Social", "")),

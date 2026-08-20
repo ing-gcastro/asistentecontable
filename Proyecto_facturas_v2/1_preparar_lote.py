@@ -53,6 +53,7 @@ def generar_excel_lote():
             print(f"  ⚠️ Documento no válido/descartado. Marcando para RECHAZAR.")
             datos_excel.append({
                 "Archivo_Original": archivo,
+                "Empresa": "TELCOM VENTURES",
                 "Razón_Social": "NO FACTURA",
                 "Sector": "GENERAL",
                 "Tipo": "N/A",
@@ -82,7 +83,11 @@ def generar_excel_lote():
         oc_extraida_limpia = str(datos.get("oc_extraida", "")).strip()
         if oc_extraida_limpia.endswith('.0'): oc_extraida_limpia = oc_extraida_limpia[:-2]
         
-        nombre_sugerido = f"({nombre_mes}) {nombre_final} {tipo_str} {nro_str} {sector_str}"
+        es_eurosat = datos.get("es_eurosat", False)
+        empresa_str = "EUROSAT" if es_eurosat else "TELCOM VENTURES"
+        prefijo_empresa = "(EUROSAT) " if es_eurosat else ""
+        
+        nombre_sugerido = f"{prefijo_empresa}({nombre_mes}) {nombre_final} {tipo_str} {nro_str} {sector_str}"
         if oc_extraida_limpia:
             nombre_sugerido += f" -OC {oc_extraida_limpia}"
 
@@ -99,6 +104,7 @@ def generar_excel_lote():
             print(f"  🛑 DUPLICADA DETECTADA: {nombre_final} {nro_str} ya fue procesada anteriormente.")
             datos_excel.append({
                 "Archivo_Original": archivo,
+                "Empresa": empresa_str,
                 "Razón_Social": nombre_final,
                 "Sector": sector_str,
                 "Tipo": tipo_str,
@@ -114,6 +120,7 @@ def generar_excel_lote():
             accion_defecto = "RECHAZAR" if es_lista_negra else "APROBAR"
             datos_excel.append({
                 "Archivo_Original": archivo,
+                "Empresa": empresa_str,
                 "Razón_Social": nombre_final,
                 "Sector": sector_str,
                 "Tipo": tipo_str,

@@ -148,14 +148,16 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
                 
         # ─── EXTRACCIÓN ROBUSTA DE CUIT DEL PROVEEDOR ─────────────────────────
         cuit_proveedor = ""
-        cuit_propio_limpio = "30696428898"
+        cuit_propio_limpio = "30696428898"      # TELCOM VENTURES
+        cuit_eurosat_limpio = "33676549639"     # EUROSAT
+        cuits_clientes = {cuit_propio_limpio, cuit_eurosat_limpio}
         
         # 1. Buscar todos los CUITs de 11 dígitos en el texto
         todos_cuits_raw = re.findall(r"\b((?:20|23|24|27|30|33|34)[-\s]?\d{2}[-\s]?\d{6}[-\s]?\d{1})\b", texto_original)
         posibles_cuits = []
         for c in todos_cuits_raw:
             c_limpio = "".join(filter(str.isdigit, c))
-            if c_limpio and c_limpio != cuit_propio_limpio and len(c_limpio) == 11:
+            if c_limpio and c_limpio not in cuits_clientes and len(c_limpio) == 11:
                 if c_limpio not in posibles_cuits:
                     posibles_cuits.append(c_limpio)
 
@@ -171,7 +173,7 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
                 todos_cuits_raw = re.findall(r"\b((?:20|23|24|27|30|33|34)[-\s]?\d{2}[-\s]?\d{6}[-\s]?\d{1})\b", texto_original)
                 for c in todos_cuits_raw:
                     c_limpio = "".join(filter(str.isdigit, c))
-                    if c_limpio and c_limpio != cuit_propio_limpio and len(c_limpio) == 11:
+                    if c_limpio and c_limpio not in cuits_clientes and len(c_limpio) == 11:
                         cuit_proveedor = c_limpio
                         break 
 
@@ -182,9 +184,8 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
             fecha_emision_str = m_fecha.group(1).replace("-", "/")
 
         es_eurosat = False
-        cuit_eurosat_limpio = REGLAS_EXTRACCION.get("cuit_eurosat", "33676549639")
-        nombre_eurosat = REGLAS_EXTRACCION.get("nombre_eurosat", "EUROSAT")
-        if nombre_eurosat in texto_original.upper() or cuit_eurosat_limpio in texto_original:
+        # Detección por palabra clave EUROSAT o por su CUIT (con o sin guiones/espacios)
+        if bool(re.search(r"\bEUROSAT\b", texto_original, re.IGNORECASE)) or bool(re.search(r"33[-\s]?67654963[-\s]?9", texto_original)):
             es_eurosat = True
                 
         # --- EXTRACCIÓN DE OC Y SUBTOTAL ---
