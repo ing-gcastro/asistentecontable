@@ -36,7 +36,7 @@ def obtener_facturas_procesadas(ruta_html):
         procesadas = set()
         for _, row in df_existente.iterrows():
             razon_raw = str(row.get('Razón Social', row.get('Razon Social', ''))).strip().upper()
-            razon = re.sub(r'^\([^)]+\)\s*', '', razon_raw).strip()
+            razon = re.sub(r'^(\([^)]+\)\s*)+', '', razon_raw).strip()
             nro = str(row.get('Nro Comprobante', '')).strip()
             if razon and nro and razon not in ["NAN", "DESCONOCIDO", "PROVEEDOR_DESCONOCIDO", ""] and nro != "NAN":
                 procesadas.add((razon, nro))
@@ -120,7 +120,7 @@ def parsear_nombre_aprobado(nombre_archivo):
         
         if len(partes) > 0:
             izquierda = partes[0].strip()
-            rs_limpia = re.sub(r'^\([^)]+\)\s*', '', izquierda).strip()
+            rs_limpia = re.sub(r'^(\([^)]+\)\s*)+', '', izquierda).strip()
             if rs_limpia:
                 razon_social = rs_limpia
 
@@ -178,6 +178,13 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
     if os.path.exists(ruta_html):
         try:
             df_historico = pd.read_html(ruta_html)[0]
+            if not df_historico.empty:
+                if 'Razon Social' in df_historico.columns:
+                    if 'Razón Social' in df_historico.columns:
+                        df_historico['Razón Social'] = df_historico['Razón Social'].fillna(df_historico['Razon Social'])
+                        df_historico.drop(columns=['Razon Social'], inplace=True)
+                    else:
+                        df_historico.rename(columns={'Razon Social': 'Razón Social'}, inplace=True)
         except Exception:
             df_historico = pd.DataFrame()
     else:
@@ -389,6 +396,34 @@ def generar_reporte_html(datos_nuevos=None, ruta_html=HTML_SALIDA):
             df_consolidado.sort_values(by=["Fecha"], ascending=False, inplace=True)
             _escribir_html(df_consolidado, ruta_consolidado_sector, "Reporte Consolidado por Sector", es_sector=True)
 
+def obtener_data_order_fecha(fecha_val):
+    if not fecha_val or pd.isna(fecha_val):
+        return ""
+    s = str(fecha_val).strip()
+    if not s or s.lower() == 'nan':
+        return ""
+    try:
+        if "/" in s:
+            partes = s.split()
+            fecha_p = partes[0].split("/")
+            if len(fecha_p) == 3:
+                dia, mes, anio = fecha_p[0].zfill(2), fecha_p[1].zfill(2), fecha_p[2]
+                hora_p = partes[1] if len(partes) > 1 else "00:00:00"
+                return f'data-order="{anio}-{mes}-{dia} {hora_p}"'
+        elif "-" in s:
+            partes = s.split()
+            fecha_p = partes[0].split("-")
+            if len(fecha_p) == 3:
+                if len(fecha_p[0]) == 4: # YYYY-MM-DD
+                    return f'data-order="{s}"'
+                elif len(fecha_p[2]) == 4: # DD-MM-YYYY
+                    dia, mes, anio = fecha_p[0].zfill(2), fecha_p[1].zfill(2), fecha_p[2]
+                    hora_p = partes[1] if len(partes) > 1 else "00:00:00"
+                    return f'data-order="{anio}-{mes}-{dia} {hora_p}"'
+    except Exception:
+        pass
+    return ""
+
 def _escribir_html(df_final, ruta_html, titulo, es_sector=False):
     timestamp_actual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     
@@ -503,9 +538,12 @@ def _escribir_html(df_final, ruta_html, titulo, es_sector=False):
         nro_disp = str(row.get('Nro Comprobante', '')).strip()
         if nro_disp.endswith('.0'): nro_disp = nro_disp[:-2]
 
+        fecha_val = str(row.get('Fecha', '')).strip()
+        data_order_attr = obtener_data_order_fecha(fecha_val)
+
         html_content += f"""
                     <tr>
-                        <td>{row.get('Fecha', '')}</td>
+                        <td {data_order_attr}>{fecha_val}</td>
                         <td><span class="badge bg-secondary">{row.get('Empresa', 'TELCOM VENTURES')}</span></td>
                         <td class="fw-bold">{row.get('Razón Social', '')}</td>
                         <td>{row.get('Tipo', '')}</td>
@@ -536,7 +574,7 @@ def _escribir_html(df_final, ruta_html, titulo, es_sector=False):
                     "url": "//cdn.datatables.net/plug-ins/1.13.6/i18n/es-ES.json"
                 }},
                 "pageLength": 25,
-                "order": []
+                "order": [[0, "desc"]]
             }});
 
             $('#tabla_reporte thead tr:eq(1) input').on('keyup change clear', function () {{

@@ -90,6 +90,10 @@ def buscar_proveedor(cuit_pdf, razon_social_pdf, base_proveedores):
                 sector = sectores_dict.get(cuit_key, "")
                 return nombre_oficial, sector, datos['es_lista_negra']
                 
-    # 3. Emergencia
+    # 3. Emergencia / Proveedor Nuevo
+    if razon_limpia and razon_limpia not in ["PROVEEDOR_DESCONOCIDO", "DESCONOCIDO", "NO FACTURA", "NAN"]:
+        if "TELCOM VENTURES" not in razon_limpia and "EUROSAT" not in razon_limpia:
+            return razon_limpia, "", False
+
     nombre_emergencia = f"PROVEEDOR_CUIT_{cuit_limpio}" if cuit_limpio else "PROVEEDOR_DESCONOCIDO"
     return nombre_emergencia, "", False

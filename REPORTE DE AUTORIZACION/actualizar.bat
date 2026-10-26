@@ -3,5 +3,5 @@
 timeout /t 10 /nobreak >nul
 
 :: Cambia a la carpeta de tus scripts y ejecuta Python
-cd /d C:\Users\gcastro\ROBOTS\REPORTE DE AUTORIZACION
-python indexar_pdfs.py
+cd /d "%~dp0"
+"C:\Users\gcastro\AppData\Local\anaconda3\python.exe" indexar_pdfs.py

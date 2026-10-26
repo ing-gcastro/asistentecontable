@@ -28,7 +28,7 @@ def parsear_nombre_archivo(nombre_archivo):
             partes = re.split(rf'\b{tipo_encontrado}\b', nombre_sin_ext, flags=re.IGNORECASE)
             if len(partes) > 1:
                 parte_izq = partes[0].strip()
-                razon_social_limpia = re.sub(r'^\([^)]+\)\s*', '', parte_izq).strip()
+                razon_social_limpia = re.sub(r'^(\([^)]+\)\s*)+', '', parte_izq).strip()
                 if razon_social_limpia:
                     razon_social = razon_social_limpia
 

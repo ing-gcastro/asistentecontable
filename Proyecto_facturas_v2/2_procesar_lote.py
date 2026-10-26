@@ -31,6 +31,30 @@ def limpiar_cadena_oc(val):
         s = s[:-2]
     return "" if s.lower() == 'nan' else s
 
+def mover_archivo_seguro(origen, destino):
+    """Mueve un archivo evitando bloqueos de permisos en Windows (ej: Acrobat o Vista Previa)."""
+    if not os.path.exists(origen):
+        return False, "Archivo no existe"
+    destino_final = obtener_ruta_unica(destino)
+    try:
+        shutil.move(origen, destino_final)
+        return True, destino_final
+    except PermissionError:
+        # Si shutil.move falla por bloqueo de lectura/borrado, intentar copiar al destino
+        try:
+            shutil.copy2(origen, destino_final)
+            try:
+                os.remove(origen)
+            except Exception:
+                print(f"  ⚠️ El archivo de origen quedó bloqueado por otro programa (ej: Acrobat/Vista Previa) y no se pudo borrar de entrada: {os.path.basename(origen)}")
+            return True, destino_final
+        except Exception as e:
+            print(f"  ❌ Error de permisos al copiar {os.path.basename(origen)} (Asegúrate de no tenerlo abierto en un visor de PDF): {e}")
+            return False, str(e)
+    except Exception as e:
+        print(f"  ❌ Error al mover {os.path.basename(origen)}: {e}")
+        return False, str(e)
+
 def procesar_excel_lote():
     print("Iniciando Procesamiento de Lote (Paso 2)...")
     cerrar_excel_si_abierto()
@@ -59,6 +83,8 @@ def procesar_excel_lote():
     rechazadas = 0
     revision = 0
     
+    aprobados_en_ejecucion = set()
+    
     for index, row in df.iterrows():
         archivo_orig = str(row.get("Archivo_Original", "")).strip()
         accion = str(row.get("Acción", "")).strip().upper()
@@ -76,18 +102,31 @@ def procesar_excel_lote():
         accion_norm = accion.replace("Ó", "O").replace("Í", "I").replace("Á", "A").replace("É", "E").replace("Ú", "U")
         
         if "RECHAZ" in accion_norm or "NO" in accion_norm or "DESCART" in accion_norm:
-            destino_b = obtener_ruta_unica(os.path.join(CARPETA_B, archivo_orig))
-            shutil.move(ruta_completa, destino_b)
-            rechazadas += 1
-            print(f"❌ RECHAZADA: {archivo_orig}")
+            exito_m, _ = mover_archivo_seguro(ruta_completa, os.path.join(CARPETA_B, archivo_orig))
+            if exito_m:
+                rechazadas += 1
+                print(f"❌ RECHAZADA: {archivo_orig}")
             
         elif "REVIS" in accion_norm:
-            destino_rev = obtener_ruta_unica(os.path.join(CARPETA_REVISION, archivo_orig))
-            shutil.move(ruta_completa, destino_rev)
-            revision += 1
-            print(f"⏸️  A REVISIÓN: {archivo_orig}")
+            exito_m, _ = mover_archivo_seguro(ruta_completa, os.path.join(CARPETA_REVISION, archivo_orig))
+            if exito_m:
+                revision += 1
+                print(f"⏸️  A REVISIÓN: {archivo_orig}")
             
         elif "APROB" in accion_norm or "OK" in accion_norm or "SI" in accion_norm:
+            nro_comp = str(row.get("Nro_Comprobante", "")).strip()
+            razon_social = str(row.get("Razón_Social", row.get("Razon_Social", ""))).strip()
+            ident_prov = razon_social.upper()
+
+            clave_proc = (ident_prov, nro_comp)
+            if nro_comp not in ["SinNumero", "N/A", "S_N", "", "nan"]:
+                if clave_proc in aprobados_en_ejecucion:
+                    print(f"🛑 DUPLICADO OMITIDO EN PROCESAMIENTO: {archivo_orig} (Comp. {nro_comp}) ya fue procesado en este lote. Moviendo a 'no es factura' para evitar legajos duplicados.")
+                    mover_archivo_seguro(ruta_completa, os.path.join(CARPETA_B, archivo_orig))
+                    rechazadas += 1
+                    continue
+                aprobados_en_ejecucion.add(clave_proc)
+
             # Extraer campos corregidos manualmente del Excel
             nombre_propuesto = str(row.get("Nombre_Propuesto", "")).strip()
             sector_editado = str(row.get("Sector", "")).strip().upper()
@@ -99,14 +138,12 @@ def procesar_excel_lote():
             
             # ─── RE-CONSTRUIR DINÁMICAMENTE EL NOMBRE Y EL SECTOR SI SE MODIFICÓ LA OC O EL SECTOR ───
             # Eliminar la marca [DUPLICADA] si el usuario forzó APROBAR
-            nombre_propuesto = nombre_propuesto.replace(" [DUPLICADA]", "")
+            nombre_propuesto = nombre_propuesto.replace(" [DUPLICADA HISTORIAL]", "").replace(" [DUPLICADA EN LOTE]", "").replace(" [DUPLICADA]", "")
             
             # Ajustar extensión
             if not nombre_propuesto.lower().endswith('.pdf'):
                 nombre_propuesto += ".pdf"
                 
-            # Si el sector fue editado en la celda del Excel, asegurar que el nombre lo refleje
-            # Reemplazar la palabra de sector si estaba al final del nombre base
             base_sin_ext = os.path.splitext(nombre_propuesto)[0]
 
             archivos_a_fusionar = [ruta_completa]
@@ -128,23 +165,43 @@ def procesar_excel_lote():
             if adjuntos_extra and adjuntos_extra != 'nan':
                 rutas_extra = [r.strip() for r in adjuntos_extra.split(",")]
                 for r_extra in rutas_extra:
-                    r_extra = r_extra.strip('"\'')
+                    r_extra = r_extra.strip().strip('"\'`').strip()
                     if os.path.exists(r_extra):
                         print(f"  📎 Adjuntando archivo extra: {os.path.basename(r_extra)}")
                         archivos_a_fusionar.append(r_extra)
                     else:
                         print(f"  ⚠️ Archivo extra no encontrado: {r_extra}")
             
-            empresa_val = "EUROSAT" if ("(EUROSAT)" in nombre_propuesto.upper() or str(row.get("Empresa", "")).strip().upper() == "EUROSAT") else "TELCOM VENTURES"
-            if empresa_val == "EUROSAT" and not nombre_propuesto.upper().startswith("(EUROSAT)"):
-                nombre_propuesto = f"(EUROSAT) {nombre_propuesto}"
+            valor_tarjeta = str(row.get("Tarjeta", "")).strip().upper()
+            es_tarjeta = valor_tarjeta in ["SI", "S", "VISA", "VISA CORPO", "TARJETA", "TRUE", "1"]
+            
+            if es_tarjeta and not nombre_propuesto.upper().startswith("(VISA CORPO)"):
+                nombre_propuesto = f"(VISA CORPO) {nombre_propuesto}"
+            elif valor_tarjeta in ["NO", "N", "FALSE", "0"] and nombre_propuesto.upper().startswith("(VISA CORPO)"):
+                nombre_propuesto = re.sub(r'^\(VISA CORPO\)\s*', '', nombre_propuesto, flags=re.IGNORECASE).strip()
 
-            # ─── RUTEADOR DINÁMICO AL SECTOR EDITADO ──────────────────────────────────
+            empresa_val = "EUROSAT" if ("(EUROSAT)" in nombre_propuesto.upper() or str(row.get("Empresa", "")).strip().upper() == "EUROSAT") else "TELCOM VENTURES"
+            if empresa_val == "EUROSAT" and "(EUROSAT)" not in nombre_propuesto.upper():
+                if nombre_propuesto.upper().startswith("(VISA CORPO)"):
+                    nombre_propuesto = f"(VISA CORPO) (EUROSAT) {nombre_propuesto[12:].strip()}"
+                else:
+                    nombre_propuesto = f"(EUROSAT) {nombre_propuesto}"
+
+            # ─── RUTEADOR DINÁMICO AL SECTOR EDITADO O SUBDIRECTORIO AUTORIZADA ─────
             nombre_limpio = re.sub(r'[\\/*?:"<>|]', "", nombre_propuesto)
             ruta_destino_c = obtener_ruta_unica(os.path.join(CARPETA_C, nombre_limpio))
             
-            # Usar la carpeta del sector editado en el Excel
-            carpeta_sector = os.path.join(CARPETA_AUTORIZACION, sector_editado)
+            valor_autorizar = str(row.get("Autorizar_Directo", row.get("Autorizar", ""))).strip().upper()
+            es_autorizada_directo = valor_autorizar in ["SI", "S", "AUTORIZADA", "AUTORIZADO", "TRUE", "1"]
+            
+            # Usar la carpeta del sector o subcarpeta AUTORIZADA si corresponde
+            if es_autorizada_directo:
+                carpeta_sector = os.path.join(CARPETA_AUTORIZACION, sector_editado, "AUTORIZADA")
+                estado_registro = "AUTORIZADA"
+            else:
+                carpeta_sector = os.path.join(CARPETA_AUTORIZACION, sector_editado)
+                estado_registro = "PENDIENTE"
+
             os.makedirs(carpeta_sector, exist_ok=True)
             ruta_destino_sector = obtener_ruta_unica(os.path.join(carpeta_sector, nombre_limpio))
             
@@ -152,12 +209,16 @@ def procesar_excel_lote():
                 fusionar_pdfs_adjuntos(archivos_a_fusionar, ruta_destino_c)
                 shutil.copy2(ruta_destino_c, ruta_destino_sector)
                 if os.path.exists(ruta_completa):
-                    os.remove(ruta_completa)
+                    try:
+                        os.remove(ruta_completa)
+                    except Exception:
+                        pass
             else:
                 shutil.copy2(ruta_completa, ruta_destino_c)
-                shutil.move(ruta_completa, ruta_destino_sector)
+                mover_archivo_seguro(ruta_completa, ruta_destino_sector)
                 
-            print(f"✅ APROBADA: {nombre_limpio} -> Enviada a sector {sector_editado}")
+            msg_aut = " [AUTORIZADA DIRECTO]" if es_autorizada_directo else ""
+            print(f"✅ APROBADA{msg_aut}: {nombre_limpio} -> Enviada a sector {sector_editado}")
             
             # Registrar en HTML
             datos_para_html.append({
@@ -165,8 +226,9 @@ def procesar_excel_lote():
                 "Empresa": empresa_val,
                 "Tipo": str(row.get("Tipo", "")),
                 "Nro Comprobante": str(row.get("Nro_Comprobante", "")),
-                "Razon Social": str(row.get("Razón_Social", "")),
+                "Razón Social": str(row.get("Razón_Social", row.get("Razon_Social", ""))),
                 "Sector": sector_editado,
+                "Estado": estado_registro,
                 "OC": oc_detectada if oc_detectada else "N/A",
                 "Subtotal": subtotal if subtotal != 'nan' else ""
             })
@@ -193,6 +255,12 @@ def procesar_excel_lote():
                     df_historico = tablas[0]
             
             if not df_historico.empty:
+                if 'Razon Social' in df_historico.columns:
+                    if 'Razón Social' in df_historico.columns:
+                        df_historico['Razón Social'] = df_historico['Razón Social'].combine_first(df_historico['Razon Social'])
+                        df_historico.drop(columns=['Razon Social'], inplace=True)
+                    else:
+                        df_historico.rename(columns={'Razon Social': 'Razón Social'}, inplace=True)
                 df_tracked = pd.concat([df_historico, df_nuevos], ignore_index=True)
             else:
                 df_tracked = df_nuevos
@@ -201,6 +269,30 @@ def procesar_excel_lote():
             
             reporter._escribir_html(df_tracked, ruta_html_maestro, "Reporte Histórico de Facturas Aprobadas")
             
+            # Actualizar Consolidado Maestro Excel
+            try:
+                from config import REPORTE_MAESTRO_EXCEL
+                if os.path.exists(REPORTE_MAESTRO_EXCEL):
+                    try:
+                        df_excel_hist = pd.read_excel(REPORTE_MAESTRO_EXCEL, dtype=str)
+                        if 'Razon Social' in df_excel_hist.columns:
+                            if 'Razón Social' in df_excel_hist.columns:
+                                df_excel_hist['Razón Social'] = df_excel_hist['Razón Social'].combine_first(df_excel_hist['Razon Social'])
+                                df_excel_hist.drop(columns=['Razon Social'], inplace=True)
+                            else:
+                                df_excel_hist.rename(columns={'Razon Social': 'Razón Social'}, inplace=True)
+                        df_excel_tracked = pd.concat([df_excel_hist, df_nuevos], ignore_index=True)
+                    except Exception:
+                        df_excel_tracked = df_nuevos
+                else:
+                    df_excel_tracked = df_nuevos
+                
+                df_excel_tracked.drop_duplicates(subset=["Razón Social", "Nro Comprobante"], keep="last", inplace=True)
+                df_excel_tracked.to_excel(REPORTE_MAESTRO_EXCEL, index=False)
+                print(f"📊 Consolidado Excel actualizado exitosamente en: {REPORTE_MAESTRO_EXCEL}")
+            except Exception as e_ex:
+                print(f"⚠️ Advertencia actualizando Reporte_Maestro.xlsx: {e_ex}")
+
             if os.path.exists(CARPETA_AUTORIZACION):
                 sectores_unicos = df_tracked['Sector'].dropna().unique()
                 for sec in sectores_unicos:
@@ -218,12 +310,11 @@ def procesar_excel_lote():
     # Archivar el Excel procesado
     if aprobadas > 0 or rechazadas > 0 or revision > 0:
         excel_bkp = os.path.join(CARPETA_A, "Validacion_Lote_Procesado.xlsx")
-        excel_bkp_unico = obtener_ruta_unica(excel_bkp)
-        try:
-            shutil.move(EXCEL_VALIDACION, excel_bkp_unico)
-            print(f"📁 Excel original archivado como {excel_bkp_unico}.")
-        except Exception as e:
-            print(f"⚠️ No se pudo archivar el Excel: {e}")
+        exito_bkp, ruta_bkp = mover_archivo_seguro(EXCEL_VALIDACION, excel_bkp)
+        if exito_bkp:
+            print(f"📁 Excel original archivado como {os.path.basename(ruta_bkp)}.")
+        else:
+            print(f"⚠️ No se pudo archivar el Excel de validación: {ruta_bkp}")
 
 if __name__ == "__main__":
     procesar_excel_lote()

@@ -7,7 +7,7 @@ echo ======================================================
 echo.
 
 cd /d "%~dp0"
-python exportar_mails_enviados.py --abrir
+"C:\Users\gcastro\AppData\Local\anaconda3\python.exe" exportar_mails_enviados.py --abrir
 
 echo.
 echo Presione cualquier tecla para salir...

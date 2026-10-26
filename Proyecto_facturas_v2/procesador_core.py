@@ -14,15 +14,16 @@ from proveedor_rules import es_factura_por_remitente, analizar_pdf_ecosan
 import oc_manager
 
 # ─── OCR FALLBACK ────────────────────────────────────────────────────────────
-def extraer_texto_con_ocr(ruta_pdf: str) -> str:
-    """Fallback OCR para PDFs escaneados o imagen usando RapidOCR + PyMuPDF."""
+def extraer_texto_con_ocr(ruta_pdf: str, max_paginas: int = 3) -> str:
+    """Fallback OCR para PDFs escaneados o imagen usando RapidOCR + PyMuPDF (limitado a max_paginas)."""
     print("   📷 Activando OCR (RapidOCR + PyMuPDF)...")
     texto_extraido = []
     try:
         from rapidocr_onnxruntime import RapidOCR
         engine = RapidOCR()
         doc = fitz.open(ruta_pdf)
-        for page_num in range(len(doc)):
+        num_paginas = min(len(doc), max_paginas)
+        for page_num in range(num_paginas):
             page = doc[page_num]
             pix = page.get_pixmap(dpi=200)
             img_bytes = pix.tobytes("png")
@@ -55,53 +56,83 @@ def es_factura_valida(texto_lower, remitente=""):
     # 1. Remitente de confianza
     if es_factura_por_remitente(remitente):
         return True
-    # 2. Limpiar frases válidas con "presupuesto"
-    texto_seguro = (texto_lower
-                    .replace("presupuesto económico", "")
-                    .replace("presupuesto economico", ""))
-    # 3. Rechazar palabras prohibidas
-    for prohibida in REGLAS_EXTRACCION["palabras_prohibidas"]:
-        if prohibida.lower() in texto_seguro:
+        
+    # Documentos prohibidos que no son facturas
+    documentos_no_factura = [
+        "orden de compra", "orden de compras", "vista de deuda",
+        "resumen de cuenta", "estado de cuenta", "cuenta corriente de clientes",
+        "cuenta corriente", "presupuesto", "nota de pedido", "para cotizar",
+        "cotización", "cotizacion", "anulada", "duplicado de recibo",
+        "recibo de pago", "certificado de cobertura"
+    ]
+    
+    # Frases secundarias comunes en facturas reales que se limpian antes del chequeo
+    texto_seguro = (
+        texto_lower.replace("presupuesto económico", "")
+        .replace("presupuesto economico", "")
+        .replace("orden de compra:", "")
+        .replace("orden de compra :", "")
+        .replace("orden de compra n", "")
+        .replace("orden de compra-", "")
+    )
+    
+    # Chequeo de CAE / CAEA / CAI AFIP
+    has_cae_valido = False
+    if re.search(r"\bC[.\s]*A[.\s]*E[.\s]*[A\s:\.\|N°º]*\n?\s*\|?\s*(\d{14,15})\b", texto_lower, re.IGNORECASE):
+        has_cae_valido = True
+    elif re.search(r"\b[678]\d{13}\b", texto_lower):
+        has_cae_valido = True
+    elif re.search(r"\bcae\b\s*[:\.]?\s*\d{14}", texto_lower, re.IGNORECASE | re.MULTILINE):
+        has_cae_valido = True
+
+    # Rechazar si contiene tipo de documento prohibido y NO posee CAE válido
+    for doc_tipo in documentos_no_factura:
+        if doc_tipo in texto_seguro and not has_cae_valido:
             return False
-    # 4. CAE numérico AFIP (14 dígitos comenzando con 8)
-    if re.search(r'\b8\d{13}\b', texto_lower):
+
+    # Si tiene un CAE AFIP válido, es un comprobante válido
+    if has_cae_valido:
         return True
-    # 5. rx_cae del diccionario (tolerante a puntos, espacios, saltos)
-    if re.search(REGLAS_EXTRACCION["rx_cae"], texto_lower, re.IGNORECASE | re.MULTILINE):
-        return True
-    # 6. Texto colapsado (fallback)
-    if "cae" in re.sub(r'[\s\n\r\t:\-\._\|]+', '', texto_lower):
-        return True
-    # 7. Factura con número de comprobante formato AFIP (emergencia)
-    if re.search(r'\bfactura\b', texto_lower) and re.search(r'\b\d{4,5}[-\s]\d{7,8}\b', texto_lower):
-        return True
+
+    # Fallback para comprobante AFIP (emergencia) si dice "Factura" y tiene número de comprobante AFIP
+    if re.search(r"\bfactura\b", texto_lower) and re.search(r"\b\d{4,5}[-\s]\d{7,8}\b", texto_lower):
+        if "vista de deuda" not in texto_lower and "cuenta corriente" not in texto_lower:
+            return True
+
     return False
 
 def extraer_datos_pdf(ruta_pdf, remitente=""):
     try:
         doc = fitz.open(ruta_pdf)
+        num_paginas = len(doc)
+        
+        # Extraer texto de las primeras 3 páginas (donde radica la factura principal)
+        texto_cabecera = "\n".join([doc[i].get_text("text", sort=True) for i in range(min(3, num_paginas))])
+        texto_cabecera_lower = texto_cabecera.lower()
+
         texto_original = "\n".join([pagina.get_text("text", sort=True) for pagina in doc])
         texto_lower = texto_original.lower()
-
-        # --- REGLA CATÁLOGOS: Si tiene más de 3 páginas, se descarta por catálogo/manual ---
-        if len(doc) > 3:
-            doc.close()
-            return False, "Documento descartado (Tiene más de 3 páginas - Catálogo/Manual)"
-
         doc.close()
 
         ocr_ejecutado = False
-        if len(texto_lower.strip()) < 50 or not es_factura_valida(texto_lower, remitente):
+        es_valida = es_factura_valida(texto_cabecera_lower, remitente) or es_factura_valida(texto_lower, remitente)
+
+        if not es_valida and (len(texto_cabecera_lower.strip()) < 50 or len(texto_lower.strip()) < 50):
             print(f"   ℹ️ Texto escaso o sin validación previa. Intentando OCR automático...")
             texto_ocr = extraer_texto_con_ocr(ruta_pdf)
             if texto_ocr.strip():
                 texto_original = texto_original + "\n" + texto_ocr
                 texto_lower = texto_original.lower()
+                texto_cabecera = texto_cabecera + "\n" + texto_ocr
+                texto_cabecera_lower = texto_cabecera.lower()
                 ocr_ejecutado = True
+                es_valida = es_factura_valida(texto_cabecera_lower, remitente) or es_factura_valida(texto_lower, remitente)
             elif not texto_lower.strip():
                 return False, "PDF vacío o imagen (OCR también falló)"
             
-        if not es_factura_valida(texto_lower, remitente):
+        if not es_valida:
+            if num_paginas > 3:
+                return False, "Documento descartado (Tiene más de 3 páginas y no contiene CAE/Factura - Catálogo/Manual)"
             return False, "Documento descartado (No tiene CAE o contiene palabras prohibidas)"
             
         tipo = "FC"
@@ -143,8 +174,18 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
             for basura in REGLAS_EXTRACCION["basura_afip"]:
                 if basura in rs_raw: rs_raw = rs_raw.split(basura)[0]
             razon_social = rs_raw.strip()
-            if REGLAS_EXTRACCION["empresa_propia"] in razon_social:
+            if REGLAS_EXTRACCION["empresa_propia"] in razon_social or "EUROSAT" in razon_social:
                 razon_social = "" 
+                
+        if not razon_social:
+            m_etiqueta = re.search(REGLAS_EXTRACCION.get("rx_razon_social_etiqueta", ""), texto_original, re.IGNORECASE)
+            if m_etiqueta:
+                rs_raw = m_etiqueta.group(1).strip().upper()
+                for basura in REGLAS_EXTRACCION["basura_afip"]:
+                    if basura in rs_raw: rs_raw = rs_raw.split(basura)[0]
+                rs_candidate = rs_raw.strip()
+                if rs_candidate and "TELCOM VENTURES" not in rs_candidate and "EUROSAT" not in rs_candidate:
+                    razon_social = rs_candidate
                 
         # ─── EXTRACCIÓN ROBUSTA DE CUIT DEL PROVEEDOR ─────────────────────────
         cuit_proveedor = ""
@@ -199,6 +240,8 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
         if m_sub:
             subtotal_encontrado = m_sub.group(1).strip()
                 
+        es_tarjeta = bool(re.search(r"\b(visa\s*corpo|visacorpo|visa|tarjeta\s*de\s*credito|pago\s*con\s*tarjeta)\b", texto_original, re.IGNORECASE))
+
         return True, {
             "tipo": tipo, 
             "numero": nro, 
@@ -206,6 +249,7 @@ def extraer_datos_pdf(ruta_pdf, remitente=""):
             "cuit": cuit_proveedor,
             "fecha_emision": fecha_emision_str,
             "es_eurosat": es_eurosat,
+            "es_tarjeta": es_tarjeta,
             "oc_extraida": oc_encontrada,
             "subtotal": subtotal_encontrado
         }
@@ -217,7 +261,13 @@ def fusionar_pdfs_adjuntos(lista_rutas_pdf, ruta_salida):
     for ruta in lista_rutas_pdf:
         try:
             doc_parcial = fitz.open(ruta)
-            doc_salida.insert_pdf(doc_parcial)
+            if doc_parcial.is_pdf:
+                doc_salida.insert_pdf(doc_parcial)
+            else:
+                pdfbytes = doc_parcial.convert_to_pdf()
+                img_pdf = fitz.open("pdf", pdfbytes)
+                doc_salida.insert_pdf(img_pdf)
+                img_pdf.close()
             doc_parcial.close()
         except Exception as e:
             print(f"⚠️ No se pudo fusionar {ruta}: {e}")
@@ -486,7 +536,7 @@ def iniciar_proceso_interactivo(ejecutar_descarga=False, usar_filtro_fecha=True,
             "Fecha": datetime.now().strftime("%d/%m/%Y"),
             "Tipo": datos['tipo'],
             "Nro Comprobante": datos['numero'],
-            "Razon Social": nombre_final,
+            "Razón Social": nombre_final,
             "Sector": sector_final,
             "OC": oc_elegida if oc_elegida else "N/A",
             "Subtotal": datos.get("subtotal", "")

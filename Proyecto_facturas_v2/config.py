@@ -33,7 +33,8 @@ ESTADO_EMAILS  = os.path.join(_BASE_REPO, "emails_procesados.json")
 ESTADO_OC_PATH = os.path.join(_BASE_REPO, "estado_oc.json")
 
 # ─── REPORTES ────────────────────────────────────────────────────────────────
-REPORTE_MAESTRO_HTML = rf"{_SERVIDOR}\AyF_Trabajoadistancia\Compras\Reporte_Maestro.html"
+REPORTE_MAESTRO_HTML  = rf"{_SERVIDOR}\AyF_Trabajoadistancia\Compras\Reporte_Maestro.html"
+REPORTE_MAESTRO_EXCEL = rf"{_SERVIDOR}\AyF_Trabajoadistancia\Compras\Reporte_Maestro.xlsx"
 
 # ─── LOGGING ─────────────────────────────────────────────────────────────────
 LOGS_DIR = os.path.join(_BASE_REPO, "..", "logs")

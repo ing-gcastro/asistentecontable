@@ -5,7 +5,18 @@ REGLAS_EXTRACCION = {
         "ANULADA", 
         "PRESUPUESTO", 
         "NOTA DE PEDIDO", 
-        "DUPLICADO DE RECIBO"
+        "DUPLICADO DE RECIBO",
+        "ORDEN DE COMPRA",
+        "ORDEN DE COMPRAS",
+        "VISTA DE DEUDA",
+        "RESUMEN DE CUENTA",
+        "ESTADO DE CUENTA",
+        "CUENTA CORRIENTE DE CLIENTES",
+        "PARA COTIZAR",
+        "COTIZACION",
+        "COTIZACIÓN",
+        "SOLICITUD DE PEDIDO",
+        "CERTIFICADO DE COBERTURA"
     ],
     # Tolerancia total a saltos de línea y símbolos entre la palabra CAE y los 14-15 dígitos
     "rx_cae": r"C[.\s]*A[.\s]*E[.\s]*[:\s\|N°]*\n?\s*\|?\s*(\d{14,15})",
@@ -14,9 +25,10 @@ REGLAS_EXTRACCION = {
     "rx_numero_comp": r"(?:A|B|C)?[-]?\d{4}[-]?(\d{8})",
     "rx_numero_guion": r"N[°º]?\s*[:]?\s*(\d{4,8})",
     "rx_razon_social": r"^([A-ZÁÉÍÓÚÑ\s\.\,\-]+(?:S\.A\.|S\.R\.L\.|S\.C\.A\.|S\.A\.|SA|SRL))\b",
+    "rx_razon_social_etiqueta": r"(?:Razón\s*Social|Razon\s*Social|Denominación|Denominacion|Nombre\s*o\s*Razón\s*Social|Apellido\s*y\s*Nombre\s*/?\s*Razón\s*Social)\s*[:\.]?\s*([^\n\r]+)",
     "basura_afip": [
         "DOMICILIO FISCAL", "RESPONSABLE INSCRIPTO", "IVA", 
-        "PUNTO DE VENTA", "FACTURA", "CUIT"
+        "PUNTO DE VENTA", "FACTURA", "CUIT", "CONDICION DE IVA", "INICIO DE ACTIVIDADES"
     ],
     "rx_cuit": r"(?:C\.?U\.?I\.?T\.?|C\.?U\.?I\.?L\.?|CUIT/CUIL/DNI)?[\s:\.\|N°º]*\n?\s*\|?\s*((?:20|23|24|27|30|33|34)[-\s]?\d{2}[-\s]?\d{6}[-\s]?\d{1})",
     "rx_fecha_emision": r"Fecha\s*[:\.]?\s*(\d{2}[-/]\d{2}[-/]\d{4})",
