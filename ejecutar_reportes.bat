@@ -1,31 +1,18 @@
 @echo off
-:: Script para automatizar la unificación de reportes de facturas
-
-echo Cargando el entorno de Anaconda...
-:: Cargar el entorno de Anaconda usando la ruta correcta
-call "C:\Users\gcastro\AppData\Local\anaconda3\Scripts\activate.bat" base
-
+chcp 65001 >nul
+title Actualizar reportes
+call "%~dp0scripts\_python.bat" || (pause & exit /b 1)
+echo ==============================================
+echo 1. Reporte Maestro, sectores y detallado
+echo ==============================================
+cd /d "%~dp0Proyecto_facturas_v2"
+"%PY%" reporter.py
 echo.
 echo ==============================================
-echo 1. Actualizando Reporte de Autorizacion...
+echo 2. Reporte de Legajos de Pago (Tesoreria)
 echo ==============================================
-cd /d "C:\Users\gcastro\ROBOTS\asistentecontable\REPORTE DE AUTORIZACION"
-"C:\Users\gcastro\AppData\Local\anaconda3\python.exe" indexar_pdfs.py
-
+cd /d "%~dp0tesoreria_pagos"
+"%PY%" indexar_legajos_pago.py
 echo.
-echo ==============================================
-echo 2. Actualizando Reporte Maestro...
-echo ==============================================
-cd /d "C:\Users\gcastro\ROBOTS\asistentecontable\Proyecto_facturas_v2"
-"C:\Users\gcastro\AppData\Local\anaconda3\python.exe" reporter.py
-
-echo.
-echo ==============================================
-echo 3. Actualizando Reporte de Legajos de Pago...
-echo ==============================================
-cd /d "C:\Users\gcastro\ROBOTS\asistentecontable"
-"C:\Users\gcastro\AppData\Local\anaconda3\python.exe" indexar_legajos_pago.py
-
-echo.
-echo ¡Proceso finalizado con éxito!
+echo Proceso finalizado.
 timeout /t 5 >nul

@@ -1,5 +1,6 @@
 @echo off
-chcp 65001
-cd /d "C:\Users\gcastro\ROBOTS\asistentecontable\Proyecto_facturas_v2"
-echo Ejecutando Auto Downloader...
-"C:\Users\gcastro\AppData\Local\anaconda3\python.exe" auto_downloader.py
+chcp 65001 >nul
+title Auto Downloader
+call "%~dp0..\scripts\_python.bat" || (pause & exit /b 1)
+cd /d "%~dp0"
+"%PY%" auto_downloader.py %*

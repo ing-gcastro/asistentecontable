@@ -1,18 +1,18 @@
-# requirements.txt — Dependencias del proyecto asistentecontable
-# Instalar con: pip install -r requirements.txt
+# requirements.txt — Dependencias del núcleo (Proyecto_facturas_v2)
+# Instalación automática: doble clic en INSTALAR.bat (raíz del repo).
+# Manual: python -m pip install -r requirements.txt
 
-# PDF processing
-pymupdf>=1.24.0          # fitz — extracción de texto de PDFs
+# PDF
+pymupdf>=1.24.0          # fitz: texto, render de páginas, fusión de PDFs
 
-# OCR (instalar Tesseract por separado en el sistema)
-pytesseract>=0.3.13       # Wrapper Python para Tesseract
-pdf2image>=1.17.0         # Conversión PDF a imagen para OCR
-Pillow>=10.0.0            # Imágenes PIL requeridas por pdf2image
+# QR AFIP (MEJ-01) — sin DLLs externas, wheels para Windows
+zxing-cpp>=2.2.0
 
-# Data processing
-pandas>=2.2.0             # Lectura de Excel de proveedores/OCs
-openpyxl>=3.1.0           # Motor para .xlsx
-xlrd>=2.0.1               # Motor para .xls (archivos legacy)
+# Datos
+pandas>=2.2.0            # Excel de proveedores / OCs, reportes
+openpyxl>=3.1.0          # motor .xlsx
+xlrd>=2.0.1              # motor .xls (archivos legacy)
+lxml>=4.9.0              # REQUERIDO por pandas.read_html (sin esto, el historial no se lee y no se detectan duplicados)
 
-# Windows Outlook integration
-pywin32>=306              # win32com.client para Outlook MAPI
+# Windows / Outlook / Excel
+pywin32>=306; sys_platform == "win32"

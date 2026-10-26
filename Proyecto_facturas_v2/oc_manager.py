@@ -14,8 +14,8 @@ def cargar_estado_oc():
     return {}
 
 def guardar_estado_oc(estado):
-    with open(ESTADO_OC_PATH, "w", encoding="utf-8") as f:
-        json.dump(estado, f, indent=4, ensure_ascii=False)
+    from estado import guardar_json
+    guardar_json(ESTADO_OC_PATH, estado)
 
 def leer_oc_disponibles(proveedor_cuit, proveedor_nombre):
     """
@@ -35,8 +35,8 @@ def leer_oc_disponibles(proveedor_cuit, proveedor_nombre):
     print(f"Buscando OC en BD para: '{termino_busqueda}' o CUIT '{cuit_busq}'")
     
     df_prov = df[
-        df["Proveedor"].str.contains(termino_busqueda, case=False, na=False) |
-        df["Proveedor"].str.contains(cuit_busq, case=False, na=False)
+        df["Proveedor"].str.contains(termino_busqueda, case=False, na=False, regex=False) |
+        df["Proveedor"].str.contains(cuit_busq, case=False, na=False, regex=False)
     ]
     
     # --- FILTRAR CONSUMIDAS MANUALMENTE ---

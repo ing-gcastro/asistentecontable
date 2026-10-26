@@ -1,0 +1,37 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# ── Configuración local (por PC) ────────────────────────
+Proyecto_facturas_v2/config_local.py
+
+# ── Estado de ejecución (local de cada PC, NO versionar) ─
+Proyecto_facturas_v2/emails_procesados.json
+Proyecto_facturas_v2/estado_oc.json
+Proyecto_facturas_v2/remitentes_descargas.json
+Proyecto_facturas_v2/registro_facturas.json
+Proyecto_facturas_v2/lote_datos.json
+Proyecto_facturas_v2/cache_datos_pdf.json
+*.json.tmp
+*.html.tmp
+
+# ── Datos y reportes generados ──────────────────────────
+logs/*
+!logs/.gitkeep
+Proyecto_facturas_v2/logs/
+*.log
+*.xlsx
+*.xls
+compras_oc/datos_oc_telcom.json
+compras_oc/reporte_oc_telcom.html
+datos_maestros/proveedores_no_encontrados.txt
+
+# ── Windows / editores ──────────────────────────────────
+Thumbs.db
+desktop.ini
+~$*
+.vscode/
+.idea/

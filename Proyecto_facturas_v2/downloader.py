@@ -1,17 +1,31 @@
-# downloader.py
+# downloader.py — Descarga de adjuntos de facturas desde Outlook (carpeta "Compras").
 import os
-import win32com.client
+import shutil
 from datetime import datetime
-import fitz  # PyMuPDF
+
+try:
+    import pymupdf as fitz  # PyMuPDF >= 1.24
+except ImportError:  # versiones viejas
+    import fitz
+
 from config import CARPETA_A, ESTADO_EMAILS
-import json
+from estado import agregar_remitentes, cargar_json, guardar_json
+
+CARPETA_OUTLOOK = "Compras"
+REMITENTES_IGNORADOS = ("gire",)
+REMITENTES_FUSION_TODO = ("facturacion@marinosa.com.ar",)
+REMITENTES_EXCEL_A_PDF = ("facturacion@redguard.com.ar", "facturacion@aqualine.com.ar")
+
 
 def obtener_ruta_unica(ruta):
-    if not os.path.exists(ruta): return ruta
+    if not os.path.exists(ruta):
+        return ruta
     nombre, ext = os.path.splitext(ruta)
     c = 1
-    while os.path.exists(f"{nombre} ({c}){ext}"): c += 1
+    while os.path.exists(f"{nombre} ({c}){ext}"):
+        c += 1
     return f"{nombre} ({c}){ext}"
+
 
 def fusionar_pdfs(rutas_entrada, ruta_salida):
     doc_salida = fitz.open()
@@ -25,56 +39,83 @@ def fusionar_pdfs(rutas_entrada, ruta_salida):
     doc_salida.save(ruta_salida)
     doc_salida.close()
 
+
 def excel_a_pdf(excel_path, pdf_path):
+    import win32com.client
+    excel = None
     try:
-        excel = win32com.client.Dispatch("Excel.Application")
+        excel = win32com.client.DispatchEx("Excel.Application")  # instancia propia: no toca los Excel del usuario
         excel.Visible = False
-        wb = excel.Workbooks.Open(excel_path)
-        wb.ExportAsFixedFormat(0, pdf_path)
+        excel.DisplayAlerts = False
+        wb = excel.Workbooks.Open(os.path.abspath(excel_path))
+        wb.ExportAsFixedFormat(0, os.path.abspath(pdf_path))
         wb.Close(False)
-        excel.Quit()
         return True
     except Exception as e:
         print(f"Error convirtiendo Excel a PDF {excel_path}: {e}")
-        try:
-            excel.Quit()
-        except:
-            pass
         return False
-
+    finally:
+        if excel is not None:
+            try:
+                excel.Quit()
+            except Exception:
+                pass
 
 
 def cargar_procesados():
-    if os.path.exists(ESTADO_EMAILS):
-        try:
-            with open(ESTADO_EMAILS, "r") as f:
-                return set(json.load(f))
-        except:
-            return set()
-    return set()
+    return set(cargar_json(ESTADO_EMAILS, []))
+
 
 def guardar_procesado(entry_id, procesados_set):
     procesados_set.add(entry_id)
-    with open(ESTADO_EMAILS, "w") as f:
-        json.dump(list(procesados_set), f)
+    guardar_json(ESTADO_EMAILS, sorted(procesados_set))
+
+
+def _email_remitente(msg):
+    try:
+        if msg.SenderEmailType == "EX":
+            usuario = msg.Sender.GetExchangeUser()
+            return (usuario.PrimarySmtpAddress if usuario else "desconocido").lower()
+        return (msg.SenderEmailAddress or "desconocido").lower()
+    except Exception:
+        return "desconocido"
+
+
+def _guardar_adjuntos(msg, temp_dir):
+    pdfs, excels = [], []
+    for adj in msg.Attachments:
+        nombre = (adj.FileName or "").strip()
+        ext = os.path.splitext(nombre)[1].lower()
+        if ext not in (".pdf", ".xls", ".xlsx"):
+            continue
+        r = obtener_ruta_unica(os.path.join(temp_dir, nombre))  # dos adjuntos con el mismo nombre no se pisan
+        adj.SaveAsFile(r)
+        (pdfs if ext == ".pdf" else excels).append(r)
+    return pdfs, excels
+
+
+def _mover_a_entrada(origen, nombre_final):
+    ruta_final = obtener_ruta_unica(os.path.join(CARPETA_A, nombre_final))
+    shutil.move(origen, ruta_final)
+    return ruta_final
+
 
 def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
-    print(f"Conectando a Outlook (Carpeta: Compras)...")
-    
+    print(f"Conectando a Outlook (Carpeta: {CARPETA_OUTLOOK})...")
     try:
+        import win32com.client
         outlook = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
-        carpeta = outlook.Folders["Compras"]
+        carpeta = outlook.Folders[CARPETA_OUTLOOK]
     except Exception as e:
-        print(f"ERROR: No se encontro la carpeta 'Compras' en Outlook. Detalles: {e}")
+        print(f"ERROR: No se encontro la carpeta '{CARPETA_OUTLOOK}' en Outlook. Detalles: {e}")
         return {}
-        
+
     mensajes = carpeta.Items
     mensajes.Sort("[ReceivedTime]", True)
-    
-    if not os.path.exists(CARPETA_A):
-        os.makedirs(CARPETA_A, exist_ok=True)
-        
+
+    os.makedirs(CARPETA_A, exist_ok=True)
     descargados = 0
+    errores = 0
     f_ini = datetime.strptime(fecha_inicio, "%d/%m/%Y").date() if fecha_inicio else None
     f_correo = filtro_proveedor.strip().lower()
 
@@ -83,124 +124,95 @@ def descargar_facturas_outlook(fecha_inicio="", filtro_proveedor=""):
 
     temp_dir = os.path.join(CARPETA_A, "temp_descargas")
     os.makedirs(temp_dir, exist_ok=True)
-    
     procesados = cargar_procesados()
 
-    for msg in mensajes:
-        try:
-            if msg.Class != 43: continue 
-            
-            fecha_msg = msg.ReceivedTime.date()
-            if f_ini and fecha_msg < f_ini:
-                break 
-                
-            email = (msg.SenderEmailAddress if msg.SenderEmailType != "EX" else (msg.Sender.GetExchangeUser().PrimarySmtpAddress if msg.Sender.GetExchangeUser() else "desconocido")).lower()
-            
-            if f_correo and f_correo not in email:
-                continue
-                
-            if "gire" in email or "gire.com" in email:
-                continue
-                
-            # Usamos Fecha + Asunto + Remitente para estar 100% seguros
-            asunto_limpio = msg.Subject.replace('\r', '').replace('\n', '')[:50] if msg.Subject else "sin_asunto"
-            fecha_str = msg.ReceivedTime.strftime('%Y%m%d%H%M%S')
-            entry_id = f"{fecha_str}_{email}_{asunto_limpio}"
-            
-            if entry_id in procesados:
-                continue
-                
-            if msg.Attachments.Count > 0:
-                adjuntos_pdf = []
-                adjuntos_excel = []
-                
-                # Guardar adjuntos temporalmente
-                for adj in msg.Attachments:
-                    nombre = adj.FileName.lower()
-                    if nombre.endswith('.pdf'):
-                        r = os.path.join(temp_dir, adj.FileName)
-                        adj.SaveAsFile(r)
-                        adjuntos_pdf.append(r)
-                    elif nombre.endswith('.xls') or nombre.endswith('.xlsx'):
-                        r = os.path.join(temp_dir, adj.FileName)
-                        adj.SaveAsFile(r)
-                        adjuntos_excel.append(r)
+    try:
+        for msg in mensajes:
+            try:
+                if msg.Class != 43:
+                    continue
+                if f_ini and msg.ReceivedTime.date() < f_ini:
+                    break  # ordenados del más nuevo al más viejo
 
-                if not adjuntos_pdf and not adjuntos_excel:
+                email = _email_remitente(msg)
+                if f_correo and f_correo not in email:
+                    continue
+                if any(ign in email for ign in REMITENTES_IGNORADOS):
+                    continue
+
+                asunto_limpio = msg.Subject.replace('\r', '').replace('\n', '')[:50] if msg.Subject else "sin_asunto"
+                entry_id = f"{msg.ReceivedTime.strftime('%Y%m%d%H%M%S')}_{email}_{asunto_limpio}"
+                if entry_id in procesados:
+                    continue
+
+                if msg.Attachments.Count == 0:
                     guardar_procesado(entry_id, procesados)
                     continue
 
-                # REGLA MARINO: Unir múltiples PDFs
-                if "facturacion@marinosa.com.ar" in email and len(adjuntos_pdf) > 0:
-                    base_pdf = adjuntos_pdf[0]
-                    for p in adjuntos_pdf:
-                        if "fac" in os.path.basename(p).lower():
-                            base_pdf = p
-                            break
-                            
+                adjuntos_pdf, adjuntos_excel = _guardar_adjuntos(msg, temp_dir)
+                if not adjuntos_pdf:
+                    guardar_procesado(entry_id, procesados)
+                    continue
+
+                nuevos = []
+                if any(r in email for r in REMITENTES_FUSION_TODO):
+                    # REGLA MARINO: todos los PDF del mail en uno (la factura primero)
+                    base_pdf = next((p for p in adjuntos_pdf if "fac" in os.path.basename(p).lower()), adjuntos_pdf[0])
+                    orden = [base_pdf] + [p for p in adjuntos_pdf if p != base_pdf]
                     nombre_final = os.path.basename(base_pdf)
-                    ruta_final = obtener_ruta_unica(os.path.join(CARPETA_A, nombre_final))
-                    
-                    if len(adjuntos_pdf) > 1:
-                        fusionar_pdfs(adjuntos_pdf, ruta_final)
+                    if len(orden) > 1:
+                        ruta_final = obtener_ruta_unica(os.path.join(CARPETA_A, nombre_final))
+                        fusionar_pdfs(orden, ruta_final)
                         print(f"[Descargado/Fusionado MARINO] {nombre_final}")
                     else:
-                        os.rename(adjuntos_pdf[0], ruta_final)
+                        ruta_final = _mover_a_entrada(base_pdf, nombre_final)
                         print(f"[Descargado MARINO] {nombre_final}")
-                        
-                    mapa_remitentes[os.path.basename(ruta_final)] = email
-                    descargados += 1
-                    guardar_procesado(entry_id, procesados)
+                    nuevos.append(ruta_final)
 
-                # REGLA REDGUARD / AQUALINE: Excel a PDF y fusionar
-                elif ("facturacion@redguard.com.ar" in email or "facturacion@aqualine.com.ar" in email) and len(adjuntos_pdf) > 0:
-                    base_pdf = adjuntos_pdf[0]
-                    pdfs_a_fusionar = [base_pdf]
-                    
+                elif any(r in email for r in REMITENTES_EXCEL_A_PDF):
+                    # REGLA REDGUARD / AQUALINE: cada PDF + los Excel convertidos van al primer PDF
+                    pdfs_a_fusionar = list(adjuntos_pdf)
                     for exc in adjuntos_excel:
                         pdf_gen = exc + ".pdf"
                         if excel_a_pdf(exc, pdf_gen):
                             pdfs_a_fusionar.append(pdf_gen)
-                            
-                    nombre_final = os.path.basename(base_pdf)
-                    ruta_final = obtener_ruta_unica(os.path.join(CARPETA_A, nombre_final))
-                    
+                    nombre_final = os.path.basename(adjuntos_pdf[0])
                     if len(pdfs_a_fusionar) > 1:
+                        ruta_final = obtener_ruta_unica(os.path.join(CARPETA_A, nombre_final))
                         fusionar_pdfs(pdfs_a_fusionar, ruta_final)
                         print(f"[Descargado/Fusionado con Excel] {nombre_final}")
                     else:
-                        os.rename(base_pdf, ruta_final)
+                        ruta_final = _mover_a_entrada(adjuntos_pdf[0], nombre_final)
                         print(f"[Descargado] {nombre_final}")
-                        
-                    mapa_remitentes[os.path.basename(ruta_final)] = email
-                    descargados += 1
-                    guardar_procesado(entry_id, procesados)
+                    nuevos.append(ruta_final)
 
-                # DESCARGA NORMAL
                 else:
                     for p in adjuntos_pdf:
                         nombre_final = os.path.basename(p)
-                        ruta_final = obtener_ruta_unica(os.path.join(CARPETA_A, nombre_final))
-                        os.rename(p, ruta_final)
-                        mapa_remitentes[os.path.basename(ruta_final)] = email
+                        nuevos.append(_mover_a_entrada(p, nombre_final))
                         print(f"[Descargado] {nombre_final}")
-                        descargados += 1
-                    guardar_procesado(entry_id, procesados)
-                        
+
+                for ruta in nuevos:
+                    mapa_remitentes[os.path.basename(ruta)] = email
+                descargados += len(nuevos)
+                agregar_remitentes({os.path.basename(r): email for r in nuevos})
+                guardar_procesado(entry_id, procesados)
+            except Exception as e:
+                # No se marca como procesado: se reintenta en la próxima corrida
+                errores += 1
+                try:
+                    asunto = msg.Subject
+                except Exception:
+                    asunto = "?"
+                print(f"⚠️ Error con el mail '{asunto}': {e}")
+            finally:
                 for f in os.listdir(temp_dir):
                     try:
                         os.remove(os.path.join(temp_dir, f))
-                    except:
+                    except OSError:
                         pass
-            else:
-                guardar_procesado(entry_id, procesados)
-        except Exception:
-            continue
-            
-    try:
-        os.rmdir(temp_dir)
-    except:
-        pass
-        
-    print(f"\n¡Descarga finalizada! Se obtuvieron {descargados} PDFs nuevos.")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    print(f"\n¡Descarga finalizada! Se obtuvieron {descargados} PDFs nuevos." + (f" Mails con error: {errores}." if errores else ""))
     return mapa_remitentes
